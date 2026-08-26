@@ -677,10 +677,7 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
         <button class="bigbtn" id="pl-start">Start game</button>
         </div>
 
-        <div id="admin-nav" class="hidden">
-        <div class="sec" data-t="remote.goTo">Go to</div>
-        <div class="menu-list" id="menu-list"></div>
-        </div>
+        <!-- The nav moved to the SETTINGS tab with the rest of the venue controls. -->
       </section>
 
       <!-- PLAYER -->
@@ -759,24 +756,7 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
         <div id="seat-msg"></div>
         <button class="bigbtn" id="seat-clear" style="background:#2a2f37;color:#e7e9ec" data-t="remote.seat.release">That is not me</button>
 
-        <div id="admin-settings" class="hidden">
-        <div class="sec" data-t="remote.tab.settings">Settings</div>
-        <div id="set-body"></div>
-
-        <!-- The owner account. Collapsed behind a toggle because it is used about once
-             in the life of a board, and an open password form under the volume slider
-             would be the most alarming thing on the page. (V25-8) -->
-        <div class="sec" data-t="remote.owner.title">Owner account</div>
-        <button class="bigbtn" id="ow-open" style="background:var(--panel2);color:var(--txt)" data-t="remote.owner.change">Change email or password</button>
-        <div id="ow-form" class="hidden">
-          <div class="hint" data-t="remote.owner.sub">Enter the current details to prove it is you, then whichever one you want to change. Everyone signed in as admin is signed out.</div>
-          <input id="ow-email" type="email" inputmode="email" maxlength="254" autocomplete="username" autocapitalize="off" spellcheck="false" data-tph="remote.owner.curEmail" placeholder="Current email">
-          <input id="ow-pass" type="password" maxlength="200" autocomplete="current-password" data-tph="remote.owner.curPass" placeholder="Current password">
-          <input id="ow-new-email" type="email" inputmode="email" maxlength="254" autocomplete="email" autocapitalize="off" spellcheck="false" data-tph="remote.owner.newEmail" placeholder="New email (optional)">
-          <input id="ow-new-pass" type="password" maxlength="200" autocomplete="new-password" data-tph="remote.owner.newPass" placeholder="New password (optional)">
-          <div id="ow-msg"></div>
-          <button class="bigbtn" id="ow-go" data-t="remote.owner.save">Save</button>
-        </div>
+        <!-- Settings moved to its own tab. -->
         </div>
         </div>
 
@@ -808,6 +788,36 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
       </section>
 
       <!-- STATS -->
+      <!-- SETTINGS — the venue's controls, in one place and behind admin.
+           They used to be split across two tabs that are otherwise about playing and
+           about who you are: the nav inside GAME, the settings body and the owner
+           account inside PLAYER. Neither was where anyone would look, and the board
+           has Settings as a destination of its own. -->
+      <section id="view-settings" class="view">
+        <div id="admin-nav" class="hidden">
+        <div class="sec" data-t="remote.goTo">Go to</div>
+        <div class="menu-list" id="menu-list"></div>
+        </div>
+        <div id="admin-settings" class="hidden">
+        <div class="sec" data-t="remote.tab.settings">Settings</div>
+        <div id="set-body"></div>
+
+        <!-- The owner account. Collapsed behind a toggle because it is used about once
+             in the life of a board, and an open password form under the volume slider
+             would be the most alarming thing on the page. (V25-8) -->
+        <div class="sec" data-t="remote.owner.title">Owner account</div>
+        <button class="bigbtn" id="ow-open" style="background:var(--panel2);color:var(--txt)" data-t="remote.owner.change">Change email or password</button>
+        <div id="ow-form" class="hidden">
+          <div class="hint" data-t="remote.owner.sub">Enter the current details to prove it is you, then whichever one you want to change. Everyone signed in as admin is signed out.</div>
+          <input id="ow-email" type="email" inputmode="email" maxlength="254" autocomplete="username" autocapitalize="off" spellcheck="false" data-tph="remote.owner.curEmail" placeholder="Current email">
+          <input id="ow-pass" type="password" maxlength="200" autocomplete="current-password" data-tph="remote.owner.curPass" placeholder="Current password">
+          <input id="ow-new-email" type="email" inputmode="email" maxlength="254" autocomplete="email" autocapitalize="off" spellcheck="false" data-tph="remote.owner.newEmail" placeholder="New email (optional)">
+          <input id="ow-new-pass" type="password" maxlength="200" autocomplete="new-password" data-tph="remote.owner.newPass" placeholder="New password (optional)">
+          <div id="ow-msg"></div>
+          <button class="bigbtn" id="ow-go" data-t="remote.owner.save">Save</button>
+        </div>
+      </section>
+
       <section id="view-stats" class="view">
         <div class="sec" data-t="remote.stats.standings">This game</div>
         <div id="st-standings"></div>
@@ -820,6 +830,7 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
       <button data-tab="player"><span class="ic">👤</span><span data-t="remote.tab.player">Player</span></button>
       <button data-tab="game" class="on"><span class="ic">🎯</span><span data-t="remote.tab.game">Game</span></button>
       <button id="tab-stats" data-tab="stats"><span class="ic">📊</span><span data-t="remote.tab.stats">Stats</span></button>
+      <button id="tab-settings" data-tab="settings"><span class="ic">⚙️</span><span data-t="remote.tab.settings">Settings</span></button>
     </nav>
   </main>
 
@@ -1594,9 +1605,17 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
     show("seat-box", signedIn || !!mySeat || !!isAdmin);
     var statsBtn = $("tab-stats");
     if (statsBtn) statsBtn.classList.toggle("hidden", !identified);
+    // Settings is the venue's, not the player's: admin only, exactly like the controls
+    // inside it have always been. Enforced on the BOARD too — the setting and nav
+    // commands are refused without admin — so hiding the tab is the courtesy, not the
+    // security.
+    var setBtn = $("tab-settings");
+    if (setBtn) setBtn.classList.toggle("hidden", !isAdmin);
     // Never strand someone on a view that has just been taken away from them.
     var stats = $("view-stats");
     if (!identified && stats && stats.classList.contains("on")) showTab("game");
+    var setView = $("view-settings");
+    if (!isAdmin && setView && setView.classList.contains("on")) showTab("game");
   }
 
   function showTab(name){ document.querySelectorAll(".view").forEach(function(v){ v.classList.toggle("on", v.id==="view-"+name); }); tabBtns.forEach(function(b){ b.classList.toggle("on", b.dataset.tab===name); }); }
