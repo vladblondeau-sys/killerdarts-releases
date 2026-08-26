@@ -1292,6 +1292,7 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
     $("pl-pass").value = "";   // never leave it in the DOM
     if (!r.ok) { plMsg(r.status === 503 ? "remote.player.offline" : "remote.player.wrong"); return; }
     plMsg("remote.player.ok");
+    signedIn = true;
     boardPassOffer(false);
     // Only a CLOUD sign-in can mint one — the board-password route proves you own the
     // board, not that you are a player with an account.
@@ -1309,6 +1310,11 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
   // player has gone home, which is the same objection cardActions.js makes to a board
   // storing a card. A reload asks them to sign in again; that is the correct price.
   var myToken = "";
+  // Have we signed in on this phone? NOT the same as holding a seat, and not the same as
+  // myToken either — the board's own password signs you in without one. applyAccess needs
+  // it because the sign-in form must go away once it has been used. (Found by driving a
+  // relay sign-in: the page said "Signed in ✓" with the form still under it.)
+  var signedIn = false;
 
   function playerSignIn(){
     var email = ($("pl-email").value||"").trim(), pass = $("pl-pass").value||"";
@@ -1558,9 +1564,13 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
    */
   function applyAccess(){
     var identified = !!mySeat || !!isAdmin;
-    // Signed in AND seated: nothing left to ask for.
+    // The form goes once it has been USED, not once a seat is taken. Those were the same
+    // thing before there was a sign-in; now signing in proves more than picking a chair
+    // does, and leaving the form up under "Signed in ✓" invited people to do it twice.
+    // The id-hint below is untouched and still says to pick a name — that IS the next
+    // step, and it is the one thing on this screen that was already right.
     var pl = $("player-login");
-    if (pl) pl.classList.toggle("hidden", !!mySeat);
+    if (pl) pl.classList.toggle("hidden", !!mySeat || signedIn);
     var show = function(id, on){ var e = $(id); if (e) e.classList.toggle("hidden", !on); };
     show("saved-players", identified);
     show("sugbox", identified);
@@ -1730,7 +1740,15 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
         // a green dot, flashing and buzzing for darts that reach nobody.
         // (AUDIT-RELAY #2/#12. No backticks in here: this whole page is a
         // template literal, and one would end it.)
-        if (s && s.live) { $("dot").classList.add("on"); setConn("remote.connected"); }
+        if (s && s.live) {
+          $("dot").classList.add("on"); setConn("remote.connected");
+          // Say hello, so the board knows to send the snapshot. The LAN gets this from
+          // the stream opening; here nothing observes a phone until it speaks, and a
+          // phone with no snapshot cannot even sign in (see the hello case in
+          // sanitizeCommand). Best-effort and idempotent: a duplicate costs one
+          // re-broadcast, a missing one costs the whole session.
+          if (RELAY) { try { RELAY.send({ type: "hello" }); } catch (e) {} }
+        }
         else { $("dot").classList.remove("on"); setConn(s && s.state === "board-gone" ? "remote.boardGone" : "remote.reconnecting"); }
       },
     });
@@ -1814,6 +1832,7 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
           mySeat = j.seat || mySeat;
           isAdmin = !!j.admin;
           plMsg("remote.player.ok");
+          signedIn = true;
           cardBox(!!myToken);   // the relay signs in with a cloud token too
           renderAdmin();
           if (state) renderAll();
