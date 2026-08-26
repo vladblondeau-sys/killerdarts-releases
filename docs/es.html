@@ -363,7 +363,17 @@ const STALE_CHECK_MS = 5000;
 // "poke" is deliberately in NEITHER: pokes are addressed to the board, and a
 // phone acting on one is a phone answering another phone's traffic.
 const SHARED_EVENTS = new Set(["state", "seats", "ping"]);
-const PRIVATE_EVENTS = new Set(["session", "cmderr"]);
+// "signin" is the answer to a sign-in sent over the relay. It MUST be private: it
+// carries the address Supabase returned and whether that account owns the board, and
+// the shared channel reaches every phone holding the join token.
+//
+// It was missing here for a day. The board published it, this dropped it, and the
+// phone sat on "Checking…" while the board had in fact signed the player in — the
+// tabs unlocked, because "session" was allowed and "signin" was not. Found by a phone
+// on mobile data; the tests could not see it because each side was checked against its
+// own idea of the protocol. test/relay-event-names.test.js now checks them against
+// EACH OTHER.
+const PRIVATE_EVENTS = new Set(["session", "cmderr", "signin"]);
 
 /**
  * A fresh session id: 128 bits of CSPRNG, hex.
