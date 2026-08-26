@@ -1,0 +1,1881 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0d10">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<title>Darts-Fernbedienung</title>
+<style>
+  :root { --bg:#0b0d10; --panel:#14171c; --panel2:#1b1f26; --line:#2a2f38; --txt:#f2f4f7; --dim:#8b93a1; --green:#22c55e; --gold:#eab308; --red:#ef4444; --accent:#38bdf8; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--txt); font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; overscroll-behavior:none; }
+  body { display:flex; flex-direction:column; padding:env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); height:100vh; }
+  button { font-family:inherit; color:var(--txt); border:none; cursor:pointer; }
+  .hidden { display:none !important; }
+  input, textarea { font-family:inherit; }
+
+  /* Pairing gate */
+  #pair { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px; padding:24px; }
+  #pair h1 { font-size:22px; margin:0; letter-spacing:.02em; }
+  #pair p { color:var(--dim); margin:0; text-align:center; font-size:14px; }
+  #code { width:240px; text-align:center; font-size:34px; letter-spacing:8px; padding:14px 0; border-radius:14px; background:var(--panel2); border:1px solid var(--line); color:var(--txt); }
+  #pairBtn { width:220px; padding:16px; border-radius:14px; background:var(--accent); color:#04121b; font-size:18px; font-weight:700; }
+  #pairErr { color:var(--red); font-size:13px; min-height:16px; }
+
+  /* App shell */
+  #app { flex:1; display:flex; flex-direction:column; min-height:0; }
+  #status { display:flex; align-items:center; gap:8px; font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.14em; padding:8px 14px; border-bottom:1px solid var(--line); }
+  /* #200: quick full-screen toggle (hides the phone browser's chrome). Works where the
+     browser allows Fullscreen API — Android Chrome does; on iOS Safari it no-ops, and the
+     "Add to Home screen" PWA install (manifest already standalone) is the full-screen route. */
+  #fsBtn { background:transparent; border:none; color:var(--dim); font-size:17px; line-height:1; padding:2px 6px; border-radius:6px; cursor:pointer; }
+  #fsBtn:active { background:var(--panel2); }
+  #dot { width:8px; height:8px; border-radius:50%; background:var(--red); flex:0 0 auto; }
+  #dot.on { background:var(--green); }
+  #views { flex:1; min-height:0; position:relative; }
+  .view { position:absolute; inset:0; display:none; flex-direction:column; overflow-y:auto; -webkit-overflow-scrolling:touch; }
+  .view.on { display:flex; }
+
+  /* Score view */
+  #board { padding:10px 14px 6px; }
+  .who { display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
+  .who .name { font-size:24px; font-weight:800; }
+  .who .score { font-size:34px; font-weight:800; color:var(--gold); font-variant-numeric:tabular-nums; }
+  #darts { display:flex; gap:6px; margin-top:8px; min-height:30px; }
+  .chip { flex:1; text-align:center; padding:5px 0; border-radius:9px; background:var(--panel2); border:1px solid var(--line); font-size:14px; font-weight:700; color:var(--dim); }
+  .chip.filled { color:var(--txt); border-color:var(--accent); }
+  #others { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .other { font-size:12px; color:var(--dim); background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:3px 8px; }
+  /* THUMB ZONE. Measured at 375x812 with a game running: the pad had 628px of
+     room, used 38-492, and left ~270px of the bottom of the screen empty — the
+     exact part a thumb rests on. Every dart meant reaching UP into the top
+     third. justify-content:flex-end drops the whole pad onto the bottom edge.
+
+     The three rows are then ordered by how often each is pressed in a visit,
+     nearest the thumb last: numbers 3x, multiplier 1-2x, undo/miss/bull rarely.
+     The multiplier stays ABOVE the numbers deliberately — it is modal and
+     resets after every dart, so it has to be visible before you act on it, and
+     giving it the best reach would have cost the control pressed three times
+     as often. Done with the CSS order property rather than by moving the markup,
+     so the DOM order screen readers and the existing tests rely on is untouched.
+     (No backticks in this comment — the whole page is a template literal.) */
+  #pad { flex:1; display:flex; flex-direction:column; gap:8px; padding:10px 12px 12px; min-height:0; justify-content:flex-end; }
+  /* Seated, but not this phone's turn: the server rejects these taps, so do not invite them. An
+     unseated phone is never dimmed — it is the shared wall pad. (AUDIT-V22 #3) */
+  #pad.notmine { opacity:.35; pointer-events:none; }
+  #mult { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; order:2; }
+  #mult button { padding:14px 0; border-radius:12px; background:var(--panel2); border:1px solid var(--line); font-size:15px; font-weight:800; letter-spacing:.05em; }
+  /* #175: match the in-app dartpad — double = red, treble = green, single = neutral */
+  #mult button.sel { color:#0b0d10; }
+  #mult button[data-m="1"].sel { background:var(--panel2); color:var(--txt); border-color:var(--dim); }
+  #mult button[data-m="2"].sel { background:var(--red); border-color:var(--red); }
+  #mult button[data-m="3"].sel { background:var(--green); border-color:var(--green); }
+  /* #185 + #201: the grid used to be flex:1, so it stretched to fill the phone. The keys
+     first grew huge (#171's percentage never held), then — once the height was capped —
+     sat far apart with big gaps (#185's leftover space). Fix both at the root: fixed 52px
+     rows packed to the TOP, so the buttons are a comfortable tap size AND sit close
+     together, with no stretching and nothing to scroll. */
+  #nums { display:grid; grid-template-columns:repeat(5,1fr); grid-auto-rows:52px; gap:7px; align-content:end; order:3; }
+  #nums button { border-radius:12px; background:var(--panel); border:1px solid var(--line); font-size:20px; font-weight:700; height:100%; }
+  #nums[data-mult="2"] button { border-color:var(--red); }   /* #175: number outlines recolour to the active multiplier */
+  #nums[data-mult="3"] button { border-color:var(--green); }
+  #nums button:active { background:var(--panel2); }
+  #extra { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; order:1; }
+  #extra button { padding:16px 0; border-radius:12px; font-size:16px; font-weight:800; }
+  #bull { background:var(--panel); border:1px solid var(--line); }
+  #miss { background:var(--panel); border:1px solid var(--line); color:var(--dim); }
+  #undo { background:#3a2020; border:1px solid var(--red); color:#fca5a5; }
+  /* camera-board control — secondary to scoring, so muted + smaller, under the pad */
+  #boardctl { border-top:1px solid var(--line); margin-top:2px; padding-top:10px; }
+  #boardctl-title { color:var(--dim); font-size:10px; text-transform:uppercase; letter-spacing:.14em; margin-bottom:6px; text-align:center; }
+  #boardctl-row { display:grid; grid-template-columns:repeat(2,1fr); gap:6px; }
+  #boardctl .bctl { padding:12px 0; border-radius:10px; background:var(--panel2); border:1px solid var(--line); color:var(--txt); font-size:13px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; }
+  #boardctl .bctl:active { background:var(--panel); }
+  #boardctl .bctl.busy { opacity:.45; }
+
+  /* Generic content padding for the non-score views */
+  .pad { padding:14px; }
+  .sec { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.14em; color:var(--dim); padding:16px 14px 6px; }
+  .hint { color:var(--dim); font-size:12px; padding:0 14px 4px; }
+
+  /* Menu */
+  .menu-list { padding:14px; display:flex; flex-direction:column; gap:10px; }
+  .menu-list button { display:flex; align-items:center; gap:12px; padding:16px; border-radius:14px; background:var(--panel2); border:1px solid var(--line); font-size:17px; font-weight:600; text-align:left; }
+  .menu-list button .ic { font-size:20px; width:24px; text-align:center; }
+  .menu-list button.on { border-color:var(--accent); color:var(--accent); }
+
+  /* Chips (modes, profiles) */
+  .chips { display:flex; flex-wrap:wrap; gap:6px; padding:0 14px; }
+  .chipb { padding:9px 12px; border-radius:10px; background:var(--panel2); border:1px solid var(--line); font-size:13px; font-weight:600; }
+  .chipb.on { background:var(--accent); color:#04121b; border-color:var(--accent); }
+
+  /* Lineup */
+  .lu { padding:6px 14px 0; display:flex; flex-direction:column; gap:6px; }
+  .lu-row { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 14px; border-radius:12px; background:var(--panel2); border:1px solid var(--line); }
+  /* A seat somebody else holds: visibly unavailable, but still tappable so the
+     tap can explain itself rather than doing nothing. */
+  .chipb.busy { opacity:.45; }
+  .chipb.mine { border-color:var(--green); color:var(--green); }
+  .st-row { display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:12px; background:var(--panel2); border:1px solid var(--line); margin-bottom:6px; }
+  .st-row .nm { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
+  .st-row .nu { font-variant-numeric:tabular-nums; font-weight:800; }
+  .st-row .lb { color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:.06em; }
+  .st-row.on { border-color:var(--green); }
+  #seat-msg { color:var(--gold); font-size:12px; padding:2px 14px 0; min-height:16px; }
+  #su-msg { color:var(--gold); font-size:12px; padding:2px 14px 4px; min-height:16px; }
+  #player-login input, #board-setup input { display:block; width:calc(100% - 28px); margin:8px 14px 0; padding:12px; border-radius:10px; background:var(--panel2); border:1px solid var(--line); color:var(--txt); font-size:15px; }
+  .lu-row.empty { color:var(--dim); border-style:dashed; }
+  .lu-row .x { width:30px; height:30px; border-radius:8px; background:#3a2020; border:1px solid var(--red); color:#fca5a5; font-size:16px; font-weight:800; flex:0 0 auto; }
+  .lu-name { font-weight:700; font-size:15px; }
+  .addrow { display:flex; gap:8px; padding:8px 14px 0; }
+  .addrow input { flex:1; padding:12px; border-radius:12px; background:var(--panel2); border:1px solid var(--line); color:var(--txt); font-size:15px; }
+  .addrow button { padding:0 18px; border-radius:12px; background:var(--accent); color:#04121b; font-size:15px; font-weight:800; }
+  .bigbtn { margin:14px; padding:18px; border-radius:14px; background:var(--green); color:#03130a; font-size:18px; font-weight:800; }
+  .bigbtn:disabled { background:var(--panel2); color:var(--dim); }
+
+  /* Settings */
+  .srow { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; }
+  .srow.col { flex-direction:column; align-items:stretch; gap:8px; }
+  .srow .lab { font-size:15px; font-weight:600; }
+  .srow .val { color:var(--dim); font-size:13px; font-variant-numeric:tabular-nums; }
+  .tog { width:50px; height:30px; border-radius:999px; background:var(--panel2); border:1px solid var(--line); position:relative; flex:0 0 auto; }
+  .tog::after { content:""; position:absolute; top:3px; left:3px; width:22px; height:22px; border-radius:50%; background:var(--dim); transition:.15s; }
+  .tog.on { background:var(--green); border-color:var(--green); }
+  .tog.on::after { left:24px; background:#fff; }
+  input[type=range] { width:100%; accent-color:var(--accent); }
+  .seg { display:flex; flex-wrap:wrap; gap:6px; }
+  .seg button { flex:1; min-width:64px; padding:11px 8px; border-radius:10px; background:var(--panel2); border:1px solid var(--line); font-size:13px; font-weight:600; }
+  .seg button.on { background:var(--accent); color:#04121b; border-color:var(--accent); }
+
+  /* Suggest */
+  #sugText { width:calc(100% - 28px); margin:0 14px; min-height:120px; padding:12px; border-radius:12px; background:var(--panel2); border:1px solid var(--line); color:var(--txt); font-size:15px; resize:vertical; }
+  /* #199: a clear, unmistakable confirmation on the phone that the suggestion was saved
+     — a green toast that pops in, instead of the small line it used to be. */
+  #sugMsg { margin:10px 14px 0; font-size:15px; font-weight:700; color:#04121b; background:var(--green); border-radius:12px; display:flex; align-items:center; justify-content:center; gap:8px; text-align:center; max-height:0; opacity:0; padding:0 14px; overflow:hidden; transition:max-height .2s ease, opacity .2s ease, padding .2s ease; }
+  #sugMsg.show { max-height:80px; opacity:1; padding:13px 14px; }
+
+  /* Tab bar */
+  #tabs { display:flex; border-top:1px solid var(--line); background:var(--panel); padding-bottom:env(safe-area-inset-bottom); flex:0 0 auto; }
+  #tabs button { flex:1; display:flex; flex-direction:column; align-items:center; gap:2px; padding:8px 0 7px; font-size:10px; font-weight:600; color:var(--dim); background:transparent; }
+  #tabs button .ic { font-size:20px; line-height:1; }
+  #tabs button.on { color:var(--accent); }
+  #tabs .badge { position:absolute; }
+
+  #flash { position:fixed; inset:0; pointer-events:none; opacity:0; background:var(--accent); transition:opacity .12s; z-index:50; }
+  #flash.show { opacity:.16; }
+</style>
+<script>window.RELAY_CONFIG = {"url":"https://nwjuflsfxufutiuqppyp.supabase.co","anonKey":"sb_publishable_LxbUZmvkQSJxsMMjjlZKVg_EK7fiY3Z"};</script>
+<script>"use strict";
+
+/**
+ * The Realtime wire format, in one place.
+ *
+ * Supabase Realtime speaks Phoenix channels: a WebSocket carrying JSON frames
+ * with a topic, an event, a payload and a ref. There is no SDK here on purpose —
+ * @supabase/supabase-js would pull a dependency tree into the main process to
+ * save perhaps sixty lines — but that decision only stays cheap if exactly one
+ * piece of code knows the format.
+ *
+ * BOTH ENDS USE THIS FILE. The board (relayClient.js) requires it; the phone page
+ * has it inlined verbatim at export time (scripts/build-remote-page.mjs). They are
+ * the two halves of one conversation, and a board that joins "realtime:<token>"
+ * while the phone subscribes to "<token>" is a pairing that fails with both sides
+ * looking healthy — no error, no traffic, nothing to read. Sharing the source
+ * makes that particular silence impossible.
+ *
+ * Pure by design: no sockets, no timers, no I/O. Everything here is a value in
+ * and a value out, so the frames can be asserted directly rather than inferred
+ * from what a fake socket happened to receive.
+ */
+
+/** The channel a board and its phones meet on. The join token IS the name. */
+function sharedTopic(token) {
+  return "realtime:" + token;
+}
+
+/**
+ * The channel for messages meant for ONE phone — its seat, its admin flag.
+ *
+ * Named by that phone's own sid, which is 128 bits and never broadcast, so no
+ * other phone can guess it. Same model as the join token: the name is the secret.
+ */
+function privateTopic(token, sid) {
+  return sharedTopic(token) + ":" + sid;
+}
+
+/**
+ * The socket URL.
+ *
+ * http -> ws is a substitution rather than a URL rewrite so that https becomes
+ * wss without a second branch. The key is a query parameter because that is where
+ * Realtime looks for it; it is the PUBLISHABLE key, which is safe in a URL, and
+ * the secret/admin key must never be anywhere near this.
+ */
+function socketUrl(url, anonKey) {
+  return String(url).replace(/^http/, "ws").replace(/\/+$/, "") +
+    "/realtime/v1/websocket?apikey=" + encodeURIComponent(anonKey) + "&vsn=1.0.0";
+}
+
+/** The REST endpoint for a SECURITY DEFINER function (send_command, fetch_commands). */
+function rpcUrl(url, fn) {
+  return String(url).replace(/\/+$/, "") + "/rest/v1/rpc/" + fn;
+}
+
+function joinFrame(topic, ref) {
+  // self:false — our own broadcasts must not echo back and be read as somebody
+  // else's traffic. ack:false because nothing here waits on a per-message receipt;
+  // the join reply is the only acknowledgement that matters.
+  return { topic, event: "phx_join", payload: { config: { broadcast: { self: false, ack: false } } }, ref };
+}
+
+function leaveFrame(topic, ref) {
+  return { topic, event: "phx_leave", payload: {}, ref };
+}
+
+/**
+ * Keepalive.
+ *
+ * On the "phoenix" topic, NOT the channel: it works before a join and survives a
+ * channel error, so a socket that is open but carrying nothing is still detected.
+ * Realtime drops an idle socket at around sixty seconds.
+ */
+function heartbeatFrame(ref) {
+  return { topic: "phoenix", event: "heartbeat", payload: {}, ref };
+}
+
+function broadcastFrame(topic, event, payload, ref) {
+  return { topic, event: "broadcast", payload: { type: "broadcast", event: String(event), payload }, ref };
+}
+
+/**
+ * Read an incoming frame into something a caller can switch on, or null if it is
+ * not JSON at all.
+ *
+ * Returns { topic, kind, event, payload }, where kind is one of:
+ *   "joined"    the server accepted a phx_join on this topic
+ *   "broadcast" a message from the other end
+ *   "other"     anything else (presence, heartbeat replies, errors)
+ *
+ * Deliberately does not throw: a malformed frame must not kill a socket, or the
+ * board goes silent mid-leg with no way for anyone in the room to tell.
+ */
+function parseFrame(raw) {
+  let m;
+  try { m = JSON.parse(typeof raw === "string" ? raw : (raw && raw.data)); }
+  catch { return null; }
+  if (!m || typeof m !== "object") return null;
+  const topic = m.topic || "";
+  if (m.event === "phx_reply") {
+    const ok = !!(m.payload && m.payload.status === "ok");
+    return { topic, kind: ok ? "joined" : "other", event: "phx_reply", payload: m.payload };
+  }
+  if (m.event === "broadcast" && m.payload) {
+    return { topic, kind: "broadcast", event: m.payload.event || "", payload: m.payload.payload };
+  }
+  return { topic, kind: "other", event: m.event || "", payload: m.payload };
+}
+
+/**
+ * Does this payload contain a session token anywhere in it?
+ *
+ * Anything on the shared channel reaches every phone holding the join token, and
+ * a leaked sid is a phone able to come back as somebody else. Checked rather than
+ * trusted, because the way it would actually happen is a future caller passing a
+ * richer object to a function whose name gives no warning.
+ */
+function carriesSid(v, depth) {
+  depth = depth || 0;
+  if (!v || typeof v !== "object" || depth > 6) return false;
+  if (Array.isArray(v)) return v.some(function (x) { return carriesSid(x, depth + 1); });
+  for (const k of Object.keys(v)) {
+    if (k === "sid" || k === "sids") return true;
+    if (carriesSid(v[k], depth + 1)) return true;
+  }
+  return false;
+}
+
+const RELAY_PROTOCOL = {
+  sharedTopic, privateTopic, socketUrl, rpcUrl,
+  joinFrame, leaveFrame, heartbeatFrame, broadcastFrame,
+  parseFrame, carriesSid,
+};
+
+// Works required from the main process, and works inlined into the phone page as
+// a plain script — the page has no module loader and must not need one.
+if (typeof module !== "undefined" && module.exports) module.exports = RELAY_PROTOCOL;
+else if (typeof globalThis !== "undefined") globalThis.RELAY_PROTOCOL = RELAY_PROTOCOL;
+</script>
+<script>"use strict";
+
+/**
+ * The PHONE's half of the relay. Inlined into the exported controller page.
+ *
+ * Mirrors relayClient.js, and deliberately reads the wire format from the same
+ * relayProtocol.js rather than reimplementing it: a phone subscribing to a topic
+ * the board never joins is a pairing that fails with both ends looking healthy.
+ *
+ * The asymmetry, from this side:
+ *
+ *   board -> me      BROADCAST on the shared channel (state, seats). Everything
+ *                    here reaches every phone holding the join token, so it is
+ *                    only ever what all of them may see.
+ *
+ *   board -> me only BROADCAST on a channel named by MY sid — my seat, whether my
+ *                    session is admin. 128 bits, never broadcast anywhere, so no
+ *                    other phone can guess the name.
+ *
+ *   me -> board      send_command, an RPC no client can read back (0011). Then a
+ *                    contentless POKE on the shared channel so the board drains
+ *                    immediately instead of waiting for a poll. The poke says only
+ *                    that something is waiting — never what, never from whom.
+ *
+ * MY SID IS MINE. The LAN server issues one over SSE; here the phone mints its
+ * own and keeps it in localStorage. That is not a downgrade — entropy is what
+ * makes a sid unguessable, not who generated it — and it removes the only reason
+ * a sid would ever have to travel board-to-phone, where broadcast would have
+ * shown it to the whole pub.
+ */
+
+const P = (typeof require === "function")
+  ? require("./relayProtocol.js")
+  : (typeof globalThis !== "undefined" ? globalThis.RELAY_PROTOCOL : null);
+
+const HEARTBEAT_MS = 25000;
+const RECONNECT_MIN_MS = 1000;
+const RECONNECT_MAX_MS = 30000;
+
+// A join that is never acknowledged has to be given up on. The board has always
+// had this; the phone did not. (AUDIT-RELAY 2nd pass)
+const JOIN_TIMEOUT_MS = 10000;
+
+// How long without hearing from the BOARD before this phone stops claiming to be
+// connected. Two of the board's ping intervals plus slack: one missed ping is a
+// dropped frame, two is a board that has gone. (AUDIT-RELAY #2/#12)
+const BOARD_STALE_MS = 60000;
+const STALE_CHECK_MS = 5000;
+
+// What each channel is allowed to say. Enumerated rather than inferred, because
+// the whole point is that an event's meaning depends on where it came from.
+//
+// "poke" is deliberately in NEITHER: pokes are addressed to the board, and a
+// phone acting on one is a phone answering another phone's traffic.
+const SHARED_EVENTS = new Set(["state", "seats", "ping"]);
+const PRIVATE_EVENTS = new Set(["session", "cmderr"]);
+
+/**
+ * A fresh session id: 128 bits of CSPRNG, hex.
+ *
+ * Not the join token's alphabet — this is never read aloud or typed, only stored
+ * and compared, so hex keeps it boring. crypto.getRandomValues is present on every
+ * browser that can run this page; there is deliberately NO Math.random fallback,
+ * because a guessable sid is a phone that can be impersonated and silently
+ * degrading to that would be worse than failing here.
+ */
+function mintSid(cryptoImpl) {
+  const c = cryptoImpl || (typeof crypto !== "undefined" ? crypto : null);
+  if (!c || typeof c.getRandomValues !== "function") throw new Error("no CSPRNG available");
+  const b = new Uint8Array(16);
+  c.getRandomValues(b);
+  let out = "";
+  for (let i = 0; i < b.length; i++) out += b[i].toString(16).padStart(2, "0");
+  return out;
+}
+
+/**
+ * @param {object} cfg
+ * @param {string} cfg.url      Supabase project URL.
+ * @param {string} cfg.anonKey  The publishable key. Baked into the page, which is
+ *   why it must be the publishable one and nothing else.
+ * @param {string} cfg.token    Join token from the QR — names the shared channel.
+ * @param {string} cfg.sid      This phone's session id (mintSid, then persisted).
+ * @param {(name:string, data:any)=>void} cfg.onEvent  "state" | "seats" | "session".
+ * @param {(s:object)=>void} [cfg.onStatus]
+ */
+function createRelayPhone(cfg) {
+  const { url, anonKey, token, sid, onEvent } = cfg || {};
+  if (!P) throw new Error("relay protocol not loaded");
+  if (!url || !anonKey || !token || !sid) throw new Error("relay phone needs url, anonKey, token and sid");
+  if (typeof onEvent !== "function") throw new Error("relay phone needs an onEvent handler");
+
+  const WS = cfg.WebSocketImpl || (typeof WebSocket !== "undefined" ? WebSocket : null);
+  if (!WS) throw new Error("no WebSocket implementation available");
+  const doFetch = cfg.fetchImpl || ((...a) => fetch(...a));
+  const onStatus = cfg.onStatus || (() => {});
+  const setT = cfg.setTimeoutImpl || setTimeout;
+  const clearT = cfg.clearTimeoutImpl || clearTimeout;
+
+  const shared = P.sharedTopic(token);
+  const mine = P.privateTopic(token, sid);
+
+  let ws = null, ref = 0, joined = false, closed = false, attempt = 0;
+  let hbTimer = null, rcTimer = null, staleTimer = null, joinTimer = null;
+  const now = cfg.nowImpl || (() => Date.now());
+  let lastBoardAt = 0;   // when the board last said anything
+  let boardStale = false;
+
+  const nextRef = () => String(++ref);
+  const send = (o) => { try { ws && ws.send(JSON.stringify(o)); } catch { /* the heartbeat will notice */ } };
+  // `live` is the honest answer to "can this phone reach the board", which is NOT
+  // the same as "is my socket up" — the socket is to Supabase, and it stays up
+  // when the board is switched off.
+  const status = (state, extra) => onStatus({ state, joined, live: joined && !boardStale, ...(extra || {}) });
+
+  /** The board said something. Anything at all counts, including a bare ping. */
+  function heardFromBoard() {
+    lastBoardAt = now();
+    if (boardStale) { boardStale = false; status("joined"); }
+  }
+
+  function watchBoard() {
+    staleTimer = setT(watchBoard, STALE_CHECK_MS);
+    if (!joined || boardStale || !lastBoardAt) return;
+    if (now() - lastBoardAt < BOARD_STALE_MS) return;
+    // Joined to the rendezvous, hearing nothing from the board. Say so rather
+    // than keep showing a green dot over a dead pub PC. (AUDIT-RELAY #2/#12)
+    boardStale = true;
+    status("board-gone", { sinceMs: now() - lastBoardAt });
+  }
+
+  function heartbeat() {
+    send(P.heartbeatFrame(nextRef()));
+    hbTimer = setT(heartbeat, HEARTBEAT_MS);
+  }
+
+  function scheduleReconnect() {
+    if (closed || rcTimer) return;
+    // A phone in a pocket loses signal constantly. Backoff keeps a bad cell from
+    // hammering the rendezvous, capped so coming back is never slower than 30s.
+    const wait = Math.min(RECONNECT_MIN_MS * Math.pow(2, attempt), RECONNECT_MAX_MS);
+    attempt++;
+    status("reconnecting", { inMs: wait, attempt });
+    rcTimer = setT(() => { rcTimer = null; open(); }, wait);
+  }
+
+  function open() {
+    if (closed) return;
+    joined = false;
+    status("connecting");
+    try { ws = new WS(P.socketUrl(url, anonKey)); }
+    catch (e) { status("error", { error: String((e && e.message) || e) }); scheduleReconnect(); return; }
+
+    ws.onopen = () => {
+      send(P.joinFrame(shared, nextRef()));
+      send(P.joinFrame(mine, nextRef()));  // my seat and admin flag arrive here
+      heartbeat();
+      if (!staleTimer) watchBoard();
+      // A socket that opens but never JOINS is the worst of both: it looks
+      // connected and carries nothing, and nothing else here can notice.
+      // (AUDIT-RELAY 2nd pass)
+      //
+      // The board has had this guard all along (relayClient JOIN_TIMEOUT_MS); the
+      // phone did not. A refused join comes back as a phx_reply with status other
+      // than "ok", which relayProtocol files under kind "other" and the handler
+      // below drops. The board-gone watchdog cannot cover it either — that is
+      // gated on `joined`, which never became true. And the keepalive actively
+      // holds the socket open, so ws.onclose never fires and nothing ever retries.
+      // The result was a phone stuck on "Reconnecting" until the app was
+      // force-quit, which on an installed PWA means no address bar to reload from.
+      if (joinTimer) clearT(joinTimer);
+      joinTimer = setT(function () {
+        joinTimer = null;
+        if (joined) return;
+        status("error", { error: "join timed out" });
+        try { ws.close(); } catch (e) { /* already gone */ }  // onclose schedules the retry
+      }, JOIN_TIMEOUT_MS);
+    };
+
+    ws.onmessage = (ev) => {
+      const m = P.parseFrame(ev);
+      if (!m) return;
+
+      if (m.kind === "joined") {
+        // The SHARED channel is the one that means "connected" — the private one
+        // carries only occasional replies, so a phone could sit joined to it alone
+        // and never learn the game had started.
+        if (m.topic === shared && !joined) {
+          joined = true; attempt = 0;
+          // Start the clock HERE rather than treating the join as contact: the
+          // join is Supabase answering, not the board. Without this a phone that
+          // joins while the board is already off would never go stale, because
+          // lastBoardAt would stay 0.
+          lastBoardAt = now(); boardStale = false;
+          if (joinTimer) { clearT(joinTimer); joinTimer = null; }
+          status("joined");
+        }
+        return;
+      }
+
+      if (m.kind !== "broadcast") return;
+
+      // WHICH CHANNEL an event arrived on decides whether it may be believed.
+      // (AUDIT-RELAY #6)
+      //
+      // The shared channel is not just readable by every phone holding the join
+      // token — it is WRITABLE by them. Unioning the two topics meant a punter
+      // with devtools could publish one `session` frame there and set every other
+      // phone's sid and admin flag: their commands would then queue under HIS sid,
+      // so the board's private replies for them would go to a channel he is joined
+      // to and they are not, and their own would fall permanently silent.
+      //
+      // Per-phone state is therefore accepted ONLY from the private channel, whose
+      // name is this phone's own sid and which no other phone can guess.
+      //
+      // Not a complete fix, and saying so: a token holder can still publish a
+      // fabricated `state` on the shared channel, because it is open by
+      // construction. Closing that needs Realtime authorization on
+      // realtime.messages, which is a schema change. What this does remove is the
+      // ability to take over another phone's identity, which is the part that
+      // outlives the session.
+      if (m.topic === shared) {
+        if (!SHARED_EVENTS.has(m.event)) return;
+        heardFromBoard();
+        // A ping carries nothing and exists only to be heard.
+        if (m.event !== "ping") onEvent(m.event, m.payload);
+        return;
+      }
+      if (m.topic === mine && PRIVATE_EVENTS.has(m.event)) { heardFromBoard(); onEvent(m.event, m.payload); }
+    };
+
+    ws.onerror = () => status("error", { error: "socket error" });
+    ws.onclose = () => {
+      if (hbTimer) { clearT(hbTimer); hbTimer = null; }
+      if (joinTimer) { clearT(joinTimer); joinTimer = null; }
+      joined = false;
+      boardStale = false; lastBoardAt = 0;
+      status("closed");
+      scheduleReconnect();
+    };
+  }
+
+  return {
+    sid,
+    connect() { closed = false; attempt = 0; open(); },
+    isJoined: () => joined,
+
+    /**
+     * Send one command to the board.
+     *
+     * The insert is what carries it; the poke only tells the board to look. So the
+     * poke is best-effort and failing to send it is NOT an error — the command is
+     * already queued, and the board drains on its next poke or reconnect either
+     * way. Reporting a failure here would make a phone re-tap a dart that landed.
+     */
+    async send(cmd) {
+      let res;
+      try {
+        res = await doFetch(P.rpcUrl(url, "send_command"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json", apikey: anonKey, Authorization: "Bearer " + anonKey },
+          body: JSON.stringify({ p_token: token, p_sid: sid, p_cmd: cmd }),
+        });
+      } catch (e) {
+        return { ok: false, reason: "offline" };
+      }
+      if (!res || !res.ok) return { ok: false, reason: "rejected", status: res && res.status };
+      send(P.broadcastFrame(shared, "poke", null, nextRef()));
+      return { ok: true };
+    },
+
+    close() {
+      closed = true;
+      if (hbTimer) { clearT(hbTimer); hbTimer = null; }
+      if (rcTimer) { clearT(rcTimer); rcTimer = null; }
+      if (staleTimer) { clearT(staleTimer); staleTimer = null; }
+      if (joinTimer) { clearT(joinTimer); joinTimer = null; }
+      try { ws && ws.close(); } catch { /* already gone */ }
+      ws = null; joined = false;
+    },
+  };
+}
+
+const RELAY_PHONE = { createRelayPhone, mintSid, HEARTBEAT_MS, RECONNECT_MIN_MS, RECONNECT_MAX_MS, BOARD_STALE_MS, STALE_CHECK_MS, JOIN_TIMEOUT_MS };
+
+if (typeof module !== "undefined" && module.exports) module.exports = RELAY_PHONE;
+else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE;
+</script>
+</head>
+<body>
+  <div id="flash"></div>
+
+  <section id="pair">
+    <h1 data-t="remote.title">Darts-Fernbedienung</h1>
+    <p><span data-t="remote.pairHint">Gib den 6-stelligen Code aus der App ein</span><br><span data-t="remote.pairWhere">(Einstellungen › Handy-Fernbedienung)</span></p>
+    <input id="code" inputmode="numeric" maxlength="6" pattern="[0-9]*" placeholder="000000" autocomplete="off">
+    <div id="pairErr"></div>
+    <button id="pairBtn" data-t="remote.connect">Verbinden</button>
+  </section>
+
+  <main id="app" class="hidden">
+    <div id="status"><span id="dot"></span><span id="conn" data-t="remote.connecting">Verbinden…</span><span id="here" style="margin-left:auto"></span><button id="fsBtn" title="Vollbild" aria-label="Vollbild">⛶</button></div>
+    <div id="views">
+      <!-- SCORE -->
+      <section id="view-game" class="view on">
+        <div id="board">
+          <div class="who"><span class="name" id="curName">—</span><span class="score" id="curScore"></span></div>
+          <div id="darts"></div>
+          <div id="others"></div>
+        </div>
+        <div id="pad">
+          <div id="mult">
+            <button data-m="1" class="sel" data-t="remote.single">SINGLE</button>
+            <button data-m="2" data-t="remote.double">DOPPEL</button>
+            <button data-m="3" data-t="remote.treble">TRIPLE</button>
+          </div>
+          <div id="nums"></div>
+          <div id="extra">
+            <button id="bull" data-t="remote.bull">BULL</button>
+            <button id="miss" data-t="remote.miss">DANEBEN</button>
+            <button id="undo" data-t="remote.undo">ZURÜCK</button>
+          </div>
+        </div>
+        <!-- camera-board control (only shown when camera scoring is on) -->
+        <div id="boardctl" class="hidden">
+          <div id="boardctl-title" data-t="remote.board.title">Kamera-Board</div>
+          <div id="boardctl-row">
+            <button class="bctl" data-ba="calibrate" data-t="remote.board.calibrate">Kalibrieren</button>
+            <button class="bctl" data-ba="reset" data-t="remote.board.reset">Zurücksetzen</button>
+            <button class="bctl" data-ba="start" data-t="remote.board.start">Start</button>
+            <button class="bctl" data-ba="stop" data-t="remote.board.stop">Stopp</button>
+          </div>
+        </div>
+
+        <!-- Set-up lives in GAME, and swaps with the pad rather than sitting under
+             it: before a game the pad scores nothing, and during one the lineup is
+             settled. Only ever one of the two is on screen. -->
+        <div id="setup">
+        <div class="sec" data-t="remote.game">Spiel</div>
+        <div class="chips" id="pl-modes"></div>
+        <div class="sec" data-t="remote.lineup">Aufstellung</div>
+        <div class="lu" id="pl-lineup"></div>
+        <div class="addrow">
+          <input id="pl-name" data-tph="remote.addByName" placeholder="Spieler per Name hinzufügen" autocomplete="off">
+          <button id="pl-add" data-t="remote.add">Hinzufügen</button>
+        </div>
+        <!-- GATED: the venue roster. Every saved player at this pub, by name —
+             which is other people's data on a phone the venue does not own, so it
+             waits until you have said which player you are. Adding by NAME above
+             stays open, so a game can still be set up by someone anonymous. -->
+        <div id="saved-players" class="hidden">
+        <div class="sec" data-t="remote.addSaved">Gespeicherten Spieler hinzufügen</div>
+        <div class="chips" id="pl-profiles"></div>
+        </div>
+        <div class="sec" data-t="remote.addBot">Bot hinzufügen</div>
+        <div class="chips" id="pl-bots"></div>
+        <button class="bigbtn" id="pl-start">Spiel starten</button>
+        </div>
+
+        <div id="admin-nav" class="hidden">
+        <div class="sec" data-t="remote.goTo">Gehe zu</div>
+        <div class="menu-list" id="menu-list"></div>
+        </div>
+      </section>
+
+      <!-- PLAYER -->
+      <section id="view-player" class="view">
+        <!-- First run. A brand-new board has no owner, so the phone that scans it
+             sets one — naming the owner and choosing the PIN that will guard the
+             venue controls from then on. Replaces the seat list until done. -->
+        <div id="board-setup" class="hidden">
+          <div class="sec" data-t="remote.setup.title">Dieses Board einrichten</div>
+          <div class="hint" data-t="remote.setup.sub">Dieses Board ist neu. Lege das Inhaber-Konto an — damit meldest du dich für alle venue-weiten Änderungen an.</div>
+          <input id="su-name" maxlength="40" autocomplete="off" data-tph="remote.setup.name" placeholder="Dein Name">
+          <input id="su-email" type="email" inputmode="email" maxlength="254" autocomplete="off" autocapitalize="off" spellcheck="false" data-tph="remote.setup.email" placeholder="Deine E-Mail">
+          <input id="su-pass" type="password" maxlength="200" autocomplete="new-password" data-tph="remote.setup.pass" placeholder="Passwort wählen">
+          <input id="su-pass2" type="password" maxlength="200" autocomplete="new-password" data-tph="remote.setup.pass2" placeholder="Passwort wiederholen">
+          <div id="su-msg"></div>
+          <button class="bigbtn" id="su-go" data-t="remote.setup.go">Board einrichten</button>
+        </div>
+
+        <!-- Setting a board up happens once, and until now it said nothing: the form
+             vanished, the seat list appeared, and the owner was left looking at a list
+             of names asking which one they were. Every smaller action on this page
+             already toasts (a saved suggestion says so); the one that decides who owns
+             the venue did not. Sibling of board-setup, because that card is hidden the
+             moment the claim lands. -->
+        <div id="setup-done" class="hidden">
+          <div class="sec" data-t="remote.setup.doneTitle">Dieses Board gehört dir ✓</div>
+          <div id="sd-who"></div>
+          <div class="hint" data-t="remote.setup.doneBody">Du bist der Inhaber. Melde dich auf jedem Telefon mit dieser E-Mail an, um venue-weite Einstellungen zu ändern.</div>
+          <button class="bigbtn" id="sd-go" data-t="remote.setup.doneGo">Losspielen</button>
+        </div>
+
+        <div id="player-body">
+        <!-- Signing in is how you get into a line-up now. Picking a name off a list
+             was fine while a profile was a local scribble; it is not once that name
+             carries a portable record that follows the person to every other board. -->
+        <div id="player-login">
+          <div class="sec" data-t="remote.player.title">Zum Spielen anmelden</div>
+          <div class="hint" data-t="remote.player.sub">Neu hier? Lege ein Konto an — das dauert einen Moment, danach folgen dir deine Statistiken auf jedes Board.</div>
+          <input id="pl-email" type="email" inputmode="email" maxlength="254" autocomplete="username" autocapitalize="off" spellcheck="false" data-tph="remote.admin.email" placeholder="E-Mail des Inhabers">
+          <input id="pl-pass" type="password" maxlength="200" autocomplete="current-password" data-tph="remote.admin.pass" placeholder="Passwort">
+          <div id="pl-msg"></div>
+          <button class="bigbtn" id="pl-go" data-t="remote.player.go">Anmelden</button>
+          <button class="bigbtn" id="pl-new" style="background:var(--panel2);color:var(--txt)" data-t="remote.player.register">Konto anlegen</button>
+          <!-- Hidden until the cloud has actually refused. The board has a password of
+               its own, set when it was claimed, and it is a DIFFERENT secret from the
+               account password — which is the whole reason this is a separate button and
+               not a silent retry. See playerSignIn. -->
+          <button class="bigbtn hidden" id="pl-board" style="background:var(--panel2);color:var(--txt)" data-t="remote.player.useBoardPass">Passwort des Boards verwenden</button>
+        </div>
+
+        <!-- YOUR CARD. Shown once signed in, because minting one needs the access token
+             this phone holds and the board deliberately does not keep. A card is what
+             carries your record to a board that has never seen you. -->
+        <div id="card-box" class="hidden">
+          <div class="sec" data-t="remote.card.title">Deine Karte</div>
+          <div class="hint" data-t="remote.card.sub">Eine Karte bringt deine Statistiken auf ein Board, das dich noch nie gesehen hat. Hol dir hier eine und gib sie dort ein, wenn du ankommst.</div>
+          <button class="bigbtn" id="card-go" style="background:var(--panel2);color:var(--txt)" data-t="remote.card.get">Karte holen</button>
+          <div id="card-msg"></div>
+          <!-- readonly, not disabled: it must still be selectable to copy. -->
+          <input id="card-token" class="hidden" readonly autocomplete="off" spellcheck="false">
+        </div>
+        <div class="sec" data-t="remote.seat.title">Wer bist du?</div>
+        <div class="hint" data-t="remote.seat.sub">Wähle deinen Namen, damit dieses Handy für dich wirft. Ein Handy pro Spieler.</div>
+        <div class="chips" id="seat-list"></div>
+        <!-- There were TWO sign-in forms here, taking the same two fields on the same
+             screen: one for players, one for the venue owner. People used the wrong one,
+             which is what two identical forms deserve. A person is not a role — you sign
+             in once above, and the board works out from the same token whether you also
+             own the place. -->
+        <div id="seat-msg"></div>
+        <button class="bigbtn" id="seat-clear" style="background:#2a2f37;color:#e7e9ec" data-t="remote.seat.release">Das bin ich nicht</button>
+
+        <div id="admin-settings" class="hidden">
+        <div class="sec" data-t="remote.tab.settings">Einstell.</div>
+        <div id="set-body"></div>
+
+        <!-- The owner account. Collapsed behind a toggle because it is used about once
+             in the life of a board, and an open password form under the volume slider
+             would be the most alarming thing on the page. (V25-8) -->
+        <div class="sec" data-t="remote.owner.title">Inhaber-Konto</div>
+        <button class="bigbtn" id="ow-open" style="background:var(--panel2);color:var(--txt)" data-t="remote.owner.change">E-Mail oder Passwort ändern</button>
+        <div id="ow-form" class="hidden">
+          <div class="hint" data-t="remote.owner.sub">Gib die aktuellen Daten ein, um dich auszuweisen, und dann das, was du ändern willst. Alle Admin-Sitzungen werden abgemeldet.</div>
+          <input id="ow-email" type="email" inputmode="email" maxlength="254" autocomplete="username" autocapitalize="off" spellcheck="false" data-tph="remote.owner.curEmail" placeholder="Aktuelle E-Mail">
+          <input id="ow-pass" type="password" maxlength="200" autocomplete="current-password" data-tph="remote.owner.curPass" placeholder="Aktuelles Passwort">
+          <input id="ow-new-email" type="email" inputmode="email" maxlength="254" autocomplete="email" autocapitalize="off" spellcheck="false" data-tph="remote.owner.newEmail" placeholder="Neue E-Mail (optional)">
+          <input id="ow-new-pass" type="password" maxlength="200" autocomplete="new-password" data-tph="remote.owner.newPass" placeholder="Neues Passwort (optional)">
+          <div id="ow-msg"></div>
+          <button class="bigbtn" id="ow-go" data-t="remote.owner.save">Speichern</button>
+        </div>
+        </div>
+        </div>
+
+        <!-- GATED, and the duplicated heading removed: it was rendered twice. -->
+        <div id="sugbox" class="hidden">
+        <div class="sec" data-t="remote.sug.new">Neuer Vorschlag</div>
+        <textarea id="sugText" data-tph="remote.sug.placeholder" placeholder="Beschreib deine Idee… sie wird mit deiner Stelle in der App versehen und beim nächsten Senden am PC an den Entwickler geschickt."></textarea>
+        <!-- #262: "especially from the phone". Deliberately NO capture attribute. It was here,
+             with the comment "still allowing a pick from the gallery" — which is exactly
+             backwards: capture tells the browser to go STRAIGHT to the camera and skip the
+             picker, so on both iOS and Android the gallery/Files option disappears. The single
+             most likely thing to attach is a SCREENSHOT of the problem being reported, which
+             lives in the gallery and was therefore unattachable. With accept alone the native
+             sheet still offers Take Photo first, so the camera costs one extra tap while
+             everything else becomes possible at all. The button reads "Add a photo", not
+             "Take a photo". (AUDIT-V15)
+             NB: this HTML is a JS template literal — never use backticks in these comments. -->
+        <input type="file" id="sugPhoto" accept="image/*" style="display:none">
+        <button class="bigbtn" id="sug-photo" style="background:#2a2f37;color:#e7e9ec" data-t="remote.sug.photo">Foto hinzufügen</button>
+        <div id="sugThumbWrap" style="display:none;margin-top:8px">
+          <img id="sugThumb" alt="" style="max-width:100%;max-height:150px;border-radius:8px;display:block">
+          <button class="bigbtn" id="sug-photo-clear" style="background:#2a2f37;color:#e7e9ec;margin-top:6px" data-t="remote.sug.photoClear">Foto entfernen</button>
+        </div>
+        <div id="sugMsg"></div>
+        <button class="bigbtn" id="sug-send" style="background:var(--gold);color:#1a1400" data-t="remote.sug.save">Vorschlag speichern</button>
+        <div class="hint" id="sug-count"></div>
+        </div>
+        <div class="hint" id="id-hint" data-t="remote.identifyHint">Wähle oben deinen Namen, um Spieler und deine Statistiken zu sehen.</div>
+      </section>
+
+      <!-- STATS -->
+      <section id="view-stats" class="view">
+        <div class="sec" data-t="remote.stats.standings">Dieses Spiel</div>
+        <div id="st-standings"></div>
+        <div class="sec" data-t="remote.stats.career">An diesem Board</div>
+        <div id="st-career"></div>
+      </section>
+    </div>
+
+    <nav id="tabs">
+      <button data-tab="player"><span class="ic">👤</span><span data-t="remote.tab.player">Spieler</span></button>
+      <button data-tab="game" class="on"><span class="ic">🎯</span><span data-t="remote.tab.game">Spiel</span></button>
+      <button id="tab-stats" data-tab="stats"><span class="ic">📊</span><span data-t="remote.tab.stats">Statistik</span></button>
+    </nav>
+  </main>
+
+<script>
+(function(){
+  // ================= i18n =================
+  // A miniature of src/lib/i18n.js (deliberately NOT imported — this page ships
+  // inside electron/, and the app's catalogs are not packaged). Same contract:
+  // lookup order asked-for language → English → the key itself, {name} placeholder
+  // interpolation, and Intl.PluralRules for countable keys — not n===1, which gets
+  // French wrong (it renders 0 as singular).
+  var I18N = {"remote.title":{"en":"Darts Remote","fr":"Télécommande Darts","de":"Darts-Fernbedienung","es":"Mando Darts","nl":"Darts-afstandsbediening"},"remote.pairHint":{"en":"Enter the 6-digit code shown on the app","fr":"Saisis le code à 6 chiffres affiché dans l'app","de":"Gib den 6-stelligen Code aus der App ein","es":"Introduce el código de 6 dígitos que muestra la app","nl":"Voer de 6-cijferige code uit de app in"},"remote.pairWhere":{"en":"(Settings › Phone remote)","fr":"(Réglages › Télécommande)","de":"(Einstellungen › Handy-Fernbedienung)","es":"(Ajustes › Mando móvil)","nl":"(Instellingen › Telefoonbediening)"},"remote.connect":{"en":"Connect","fr":"Connexion","de":"Verbinden","es":"Conectar","nl":"Verbinden"},"remote.wrongCode":{"en":"Wrong code — check the app.","fr":"Code incorrect — vérifie dans l'app.","de":"Falscher Code — schau in der App nach.","es":"Código incorrecto — compruébalo en la app.","nl":"Verkeerde code — kijk in de app."},"remote.noReach":{"en":"Can't reach the app.","fr":"App injoignable.","de":"App nicht erreichbar.","es":"No se llega a la app.","nl":"App niet bereikbaar."},"remote.connecting":{"en":"Connecting…","fr":"Connexion…","de":"Verbinden…","es":"Conectando…","nl":"Verbinden…"},"remote.connected":{"en":"Connected","fr":"Connecté","de":"Verbunden","es":"Conectado","nl":"Verbonden"},"remote.reconnecting":{"en":"Reconnecting…","fr":"Reconnexion…","de":"Neu verbinden…","es":"Reconectando…","nl":"Opnieuw verbinden…"},"remote.takenOver":{"en":"Another phone took control","fr":"Un autre téléphone a pris le contrôle","de":"Ein anderes Telefon hat übernommen","es":"Otro teléfono tomó el control","nl":"Een andere telefoon nam het over"},"remote.takeControl":{"en":"Take control","fr":"Prendre le contrôle","de":"Übernehmen","es":"Tomar el control","nl":"Overnemen"},"remote.single":{"en":"SINGLE","fr":"SIMPLE","de":"SINGLE","es":"SIMPLE","nl":"ENKEL"},"remote.double":{"en":"DOUBLE","fr":"DOUBLE","de":"DOPPEL","es":"DOBLE","nl":"DUBBEL"},"remote.treble":{"en":"TREBLE","fr":"TRIPLE","de":"TRIPLE","es":"TRIPLE","nl":"TRIPLE"},"remote.bull":{"en":"BULL","fr":"BULL","de":"BULL","es":"BULL","nl":"BULL"},"remote.miss":{"en":"MISS","fr":"MANQUÉ","de":"DANEBEN","es":"FALLO","nl":"MIS"},"remote.undo":{"en":"UNDO","fr":"ANNULER","de":"ZURÜCK","es":"DESHACER","nl":"ONGEDAAN"},"remote.board.title":{"en":"Camera board","fr":"Cible caméra","de":"Kamera-Board","es":"Diana con cámara","nl":"Camerabord"},"remote.board.calibrate":{"en":"Calibrate","fr":"Calibrer","de":"Kalibrieren","es":"Calibrar","nl":"Kalibreren"},"remote.board.reset":{"en":"Reset","fr":"Réinitialiser","de":"Zurücksetzen","es":"Reiniciar","nl":"Resetten"},"remote.board.start":{"en":"Start","fr":"Démarrer","de":"Start","es":"Iniciar","nl":"Starten"},"remote.board.stop":{"en":"Stop","fr":"Arrêter","de":"Stopp","es":"Parar","nl":"Stoppen"},"remote.noGame":{"en":"No game in progress","fr":"Aucune partie en cours","de":"Kein Spiel läuft","es":"Ninguna partida en curso","nl":"Geen partij bezig"},"remote.wins":{"en":"{name} wins","fr":"{name} gagne","de":"{name} gewinnt","es":"Gana {name}","nl":"{name} wint"},"remote.goTo":{"en":"Go to","fr":"Aller à","de":"Gehe zu","es":"Ir a","nl":"Ga naar"},"remote.nav.home":{"en":"Home","fr":"Accueil","de":"Start","es":"Inicio","nl":"Start"},"remote.nav.stats":{"en":"Players & Stats","fr":"Joueurs & stats","de":"Spieler & Statistiken","es":"Jugadores y estadísticas","nl":"Spelers & statistieken"},"remote.nav.party":{"en":"Party Night","fr":"Soirée","de":"Party-Abend","es":"Noche de Fiesta","nl":"Feestavond"},"remote.nav.leagues":{"en":"Leagues","fr":"Ligues","de":"Ligen","es":"Ligas","nl":"Competities"},"remote.nav.recordings":{"en":"Recordings","fr":"Enregistrements","de":"Aufnahmen","es":"Grabaciones","nl":"Opnames"},"remote.nav.settings":{"en":"Settings","fr":"Réglages","de":"Einstellungen","es":"Ajustes","nl":"Instellingen"},"remote.game":{"en":"Game","fr":"Partie","de":"Spiel","es":"Partida","nl":"Partij"},"remote.lineup":{"en":"Line-up","fr":"Composition","de":"Aufstellung","es":"Alineación","nl":"Opstelling"},"remote.emptySlot":{"en":"Empty slot","fr":"Place libre","de":"Freier Platz","es":"Hueco libre","nl":"Vrije plek"},"remote.addByName":{"en":"Add player by name","fr":"Ajouter un joueur par son nom","de":"Spieler per Name hinzufügen","es":"Añadir jugador por nombre","nl":"Speler op naam toevoegen"},"remote.add":{"en":"Add","fr":"Ajouter","de":"Hinzufügen","es":"Añadir","nl":"Toevoegen"},"remote.addSaved":{"en":"Add a saved player","fr":"Ajouter un joueur enregistré","de":"Gespeicherten Spieler hinzufügen","es":"Añadir un jugador guardado","nl":"Opgeslagen speler toevoegen"},"remote.noProfiles":{"en":"No saved players yet — add one by name above.","fr":"Aucun joueur enregistré — ajoutes-en un par son nom ci-dessus.","de":"Noch keine gespeicherten Spieler — füge oben einen per Name hinzu.","es":"Aún no hay jugadores guardados — añade uno por nombre arriba.","nl":"Nog geen opgeslagen spelers — voeg er hierboven een op naam toe."},"remote.addBot":{"en":"Add a bot","fr":"Ajouter un bot","de":"Bot hinzufügen","es":"Añadir un bot","nl":"Bot toevoegen"},"remote.bot.beginner":{"en":"Beginner bot","fr":"Bot débutant","de":"Anfänger-Bot","es":"Bot principiante","nl":"Beginnersbot"},"remote.bot.medium":{"en":"Medium bot","fr":"Bot moyen","de":"Mittel-Bot","es":"Bot medio","nl":"Gemiddelde bot"},"remote.bot.pro":{"en":"Pro bot","fr":"Bot pro","de":"Profi-Bot","es":"Bot pro","nl":"Probot"},"remote.startGame":{"en":"Start game","fr":"Lancer la partie","de":"Spiel starten","es":"Empezar partida","nl":"Partij starten"},"remote.needPlayers":{"en":"Add at least 2 players","fr":"Ajoute au moins 2 joueurs","de":"Mindestens 2 Spieler hinzufügen","es":"Añade al menos 2 jugadores","nl":"Voeg minstens 2 spelers toe"},"remote.set.soundCaller":{"en":"Sound & caller","fr":"Son & annonceur","de":"Ton & Ansager","es":"Sonido y locutor","nl":"Geluid & omroeper"},"remote.set.sound":{"en":"Sound","fr":"Son","de":"Ton","es":"Sonido","nl":"Geluid"},"remote.set.caller":{"en":"Caller (spoken)","fr":"Annonceur (voix)","de":"Ansager (gesprochen)","es":"Locutor (voz)","nl":"Omroeper (gesproken)"},"remote.set.atmosphere":{"en":"3D atmosphere","fr":"Ambiance 3D","de":"3D-Atmosphäre","es":"Ambiente 3D","nl":"3D-sfeer"},"remote.set.atmosphereSound":{"en":"Atmosphere sound","fr":"Son d'ambiance","de":"Atmosphären-Ton","es":"Sonido de ambiente","nl":"Sfeergeluid"},"remote.set.masterVolume":{"en":"Master volume","fr":"Volume général","de":"Gesamtlautstärke","es":"Volumen general","nl":"Hoofdvolume"},"remote.set.boardScale":{"en":"Board scale","fr":"Échelle du tableau","de":"Board-Größe","es":"Escala del tablero","nl":"Bordschaal"},"remote.set.voiceGender":{"en":"Caller voice","fr":"Voix de l'annonceur","de":"Ansager-Stimme","es":"Voz del locutor","nl":"Stem omroeper"},"remote.set.female":{"en":"Female","fr":"Féminine","de":"Weiblich","es":"Femenina","nl":"Vrouw"},"remote.set.male":{"en":"Male","fr":"Masculine","de":"Männlich","es":"Masculina","nl":"Man"},"remote.set.walkOn":{"en":"Walk-on video","fr":"Vidéo d'entrée","de":"Walk-on-Video","es":"Vídeo de entrada","nl":"Opkomstvideo"},"remote.set.off":{"en":"Off","fr":"Désactivé","de":"Aus","es":"Desactivado","nl":"Uit"},"remote.set.firstLeg":{"en":"First leg","fr":"Premier leg","de":"Erstes Leg","es":"Primer leg","nl":"Eerste leg"},"remote.set.everyLeg":{"en":"Every leg","fr":"Chaque leg","de":"Jedes Leg","es":"Cada leg","nl":"Elke leg"},"remote.set.turnTimer":{"en":"Turn timer","fr":"Chrono de volée","de":"Aufnahme-Timer","es":"Cronómetro de turno","nl":"Beurtklok"},"remote.set.presentation":{"en":"Presentation","fr":"Présentation","de":"Präsentation","es":"Presentación","nl":"Presentatie"},"remote.set.theme":{"en":"Theme","fr":"Thème","de":"Design","es":"Tema","nl":"Thema"},"remote.sug.new":{"en":"New suggestion","fr":"Nouvelle suggestion","de":"Neuer Vorschlag","es":"Nueva sugerencia","nl":"Nieuwe suggestie"},"remote.sug.placeholder":{"en":"Describe your idea… it's stamped with where you are in the app, and sent to the developer next time you press Send on the PC.","fr":"Décris ton idée… elle est marquée de l'endroit où tu es dans l'app, et envoyée au développeur la prochaine fois que tu appuies sur Envoyer sur le PC.","de":"Beschreib deine Idee… sie wird mit deiner Stelle in der App versehen und beim nächsten Senden am PC an den Entwickler geschickt.","es":"Describe tu idea… se marca con el lugar donde estás en la app y se envía al desarrollador la próxima vez que pulses Enviar en el PC.","nl":"Beschrijf je idee… het wordt gemarkeerd met waar je bent in de app en naar de ontwikkelaar gestuurd zodra je op de pc op Verzenden drukt."},"remote.sug.save":{"en":"Save suggestion","fr":"Enregistrer la suggestion","de":"Vorschlag speichern","es":"Guardar sugerencia","nl":"Suggestie opslaan"},"remote.sug.saved":{"en":"Saved ✓ — send from the PC when ready.","fr":"Enregistré ✓ — envoie depuis le PC quand tu veux.","de":"Gespeichert ✓ — sende es vom PC, wenn du so weit bist.","es":"Guardada ✓ — envíala desde el PC cuando quieras.","nl":"Opgeslagen ✓ — verstuur vanaf de pc wanneer je wilt."},"remote.sug.count_one":{"en":"{count} suggestion saved on this PC.","fr":"{count} suggestion enregistrée sur ce PC.","de":"{count} Vorschlag auf diesem PC gespeichert.","es":"{count} sugerencia guardada en este PC.","nl":"{count} suggestie opgeslagen op deze pc."},"remote.sug.count_other":{"en":"{count} suggestions saved on this PC.","fr":"{count} suggestions enregistrées sur ce PC.","de":"{count} Vorschläge auf diesem PC gespeichert.","es":"{count} sugerencias guardadas en este PC.","nl":"{count} suggesties opgeslagen op deze pc."},"remote.tab.settings":{"en":"Settings","fr":"Réglages","de":"Einstell.","es":"Ajustes","nl":"Instell."},"remote.here.home":{"en":"Home","fr":"Accueil","de":"Start","es":"Inicio","nl":"Start"},"remote.here.stats":{"en":"Players","fr":"Joueurs","de":"Spieler","es":"Jugadores","nl":"Spelers"},"remote.here.party":{"en":"Party Night","fr":"Soirée","de":"Party-Abend","es":"Noche de Fiesta","nl":"Feestavond"},"remote.here.settings":{"en":"Settings","fr":"Réglages","de":"Einstellungen","es":"Ajustes","nl":"Instellingen"},"remote.here.recordings":{"en":"Recordings","fr":"Enregistrements","de":"Aufnahmen","es":"Grabaciones","nl":"Opnames"},"remote.here.leagues":{"en":"Leagues","fr":"Ligues","de":"Ligen","es":"Ligas","nl":"Competities"},"remote.here.setup":{"en":"Set up","fr":"Préparation","de":"Einrichten","es":"Preparación","nl":"Opzetten"},"remote.here.play":{"en":"Playing","fr":"En jeu","de":"Im Spiel","es":"En juego","nl":"In het spel"},"remote.here.player":{"en":"Player","fr":"Joueur","de":"Spieler","es":"Jugador","nl":"Speler"},"remote.here.league":{"en":"League","fr":"Ligue","de":"Liga","es":"Liga","nl":"Competitie"},"remote.here.compare":{"en":"Compare","fr":"Comparer","de":"Vergleichen","es":"Comparar","nl":"Vergelijken"},"remote.here.test":{"en":"Test","fr":"Test","de":"Test","es":"Test","nl":"Test"},"remote.fullscreen":{"en":"Full screen","fr":"Plein écran","de":"Vollbild","es":"Pantalla completa","nl":"Volledig scherm"},"remote.fullscreenIos":{"en":"Full screen (add to Home Screen)","fr":"Plein écran (ajouter à l'écran d'accueil)","de":"Vollbild (zum Home-Bildschirm hinzufügen)","es":"Pantalla completa (añadir a pantalla de inicio)","nl":"Volledig scherm (zet op beginscherm)"},"remote.fullscreenIosHow":{"en":"iPhone has no full-screen button in the browser. To get one: tap Share, then \"Add to Home Screen\", and open the remote from that icon.","fr":"L'iPhone n'a pas de plein écran dans le navigateur. Pour l'obtenir : appuie sur Partager, puis « Sur l'écran d'accueil », et ouvre la télécommande depuis cette icône.","de":"Das iPhone hat im Browser keinen Vollbildmodus. So geht es: auf Teilen tippen, dann \"Zum Home-Bildschirm\", und die Fernbedienung über dieses Symbol öffnen.","es":"El iPhone no tiene pantalla completa en el navegador. Para conseguirla: toca Compartir, luego \"Añadir a pantalla de inicio\", y abre el mando desde ese icono.","nl":"De iPhone heeft geen volledig scherm in de browser. Zo wel: tik op Delen, dan \"Zet op beginscherm\", en open de afstandsbediening via dat icoon."},"remote.sug.photo":{"en":"Add a photo","fr":"Ajouter une photo","de":"Foto hinzufügen","es":"Añadir una foto","nl":"Foto toevoegen"},"remote.sug.photoClear":{"en":"Remove photo","fr":"Retirer la photo","de":"Foto entfernen","es":"Quitar la foto","nl":"Foto verwijderen"},"remote.sug.photoWorking":{"en":"Shrinking the photo…","fr":"Compression de la photo…","de":"Foto wird verkleinert…","es":"Reduciendo la foto…","nl":"Foto verkleinen…"},"remote.sug.photoTooBig":{"en":"That photo is too big to send. Try another one.","fr":"Cette photo est trop lourde à envoyer. Essaie-en une autre.","de":"Dieses Foto ist zu groß zum Senden. Versuch ein anderes.","es":"Esa foto es demasiado grande para enviarla. Prueba con otra.","nl":"Die foto is te groot om te versturen. Probeer een andere."},"remote.tab.player":{"en":"Player","fr":"Joueur","de":"Spieler","es":"Jugador","nl":"Speler"},"remote.tab.game":{"en":"Game","fr":"Partie","de":"Spiel","es":"Partida","nl":"Spel"},"remote.tab.stats":{"en":"Stats","fr":"Stats","de":"Statistik","es":"Estad.","nl":"Stats"},"remote.seat.title":{"en":"Who are you?","fr":"Qui es-tu ?","de":"Wer bist du?","es":"¿Quién eres?","nl":"Wie ben jij?"},"remote.seat.sub":{"en":"Pick your name so this phone throws for you. One phone per player.","fr":"Choisis ton nom pour que ce téléphone lance pour toi. Un téléphone par joueur.","de":"Wähle deinen Namen, damit dieses Handy für dich wirft. Ein Handy pro Spieler.","es":"Elige tu nombre para que este móvil lance por ti. Un móvil por jugador.","nl":"Kies je naam zodat deze telefoon voor jou gooit. Eén telefoon per speler."},"remote.notYourTurn":{"en":"It's not your turn — that dart wasn't counted.","fr":"Ce n'est pas ton tour — cette fléchette n'a pas été comptée.","de":"Du bist nicht dran — dieser Dart wurde nicht gezählt.","es":"No es tu turno: ese dardo no se ha contado.","nl":"Je bent niet aan de beurt — die dart is niet geteld."},"remote.seat.release":{"en":"That is not me","fr":"Ce n'est pas moi","de":"Das bin ich nicht","es":"Ese no soy yo","nl":"Dat ben ik niet"},"remote.seat.taken":{"en":"Another phone is already that player.","fr":"Un autre téléphone est déjà ce joueur.","de":"Ein anderes Handy ist bereits dieser Spieler.","es":"Otro móvil ya es ese jugador.","nl":"Een andere telefoon is die speler al."},"remote.seat.failed":{"en":"Could not save that. Try again.","fr":"Enregistrement impossible. Réessaie.","de":"Konnte nicht gespeichert werden. Versuch es erneut.","es":"No se pudo guardar. Inténtalo de nuevo.","nl":"Opslaan mislukt. Probeer opnieuw."},"remote.seat.none":{"en":"Nobody is in the game yet — add players first.","fr":"Personne dans la partie pour l'instant — ajoute des joueurs.","de":"Noch niemand im Spiel — füge zuerst Spieler hinzu.","es":"Todavía no hay nadie en la partida: añade jugadores.","nl":"Nog niemand in het spel — voeg eerst spelers toe."},"remote.stats.standings":{"en":"This game","fr":"Cette partie","de":"Dieses Spiel","es":"Esta partida","nl":"Dit spel"},"remote.stats.career":{"en":"At this board","fr":"Sur cette cible","de":"An diesem Board","es":"En esta diana","nl":"Op dit bord"},"remote.stats.noGame":{"en":"No game running.","fr":"Aucune partie en cours.","de":"Kein Spiel läuft.","es":"No hay partida en curso.","nl":"Geen spel bezig."},"remote.stats.noCareer":{"en":"No players yet.","fr":"Aucun joueur pour l'instant.","de":"Noch keine Spieler.","es":"Todavía no hay jugadores.","nl":"Nog geen spelers."},"remote.stats.score":{"en":"left","fr":"restant","de":"übrig","es":"restan","nl":"resterend"},"remote.stats.avg":{"en":"avg","fr":"moy.","de":"Schnitt","es":"prom.","nl":"gem."},"remote.stats.games":{"en":"games","fr":"parties","de":"Spiele","es":"partidas","nl":"spellen"},"remote.stats.win":{"en":"won","fr":"gagné","de":"gewonnen","es":"ganado","nl":"gewonnen"},"remote.admin.title":{"en":"Venue admin","fr":"Admin du lieu","de":"Venue-Admin","es":"Admin del local","nl":"Locatiebeheer"},"remote.admin.sub":{"en":"Sign in with the board owner account to change settings, move the big screen or control the board.","fr":"Connecte-toi avec le compte propriétaire pour changer les réglages, déplacer l'écran ou piloter la cible.","de":"Melde dich mit dem Inhaber-Konto an, um Einstellungen zu ändern, den großen Bildschirm zu wechseln oder das Board zu steuern.","es":"Inicia sesión con la cuenta del propietario para cambiar ajustes, mover la pantalla grande o controlar la diana.","nl":"Log in met het eigenaarsaccount om instellingen te wijzigen, het grote scherm te wisselen of het bord te bedienen."},"remote.admin.ok":{"en":"Unlocked.","fr":"Déverrouillé.","de":"Entsperrt.","es":"Desbloqueado.","nl":"Ontgrendeld."},"remote.admin.wrong":{"en":"Wrong PIN.","fr":"Code incorrect.","de":"Falsche PIN.","es":"PIN incorrecto.","nl":"Verkeerde code."},"remote.admin.failed":{"en":"Could not reach the board.","fr":"Cible injoignable.","de":"Board nicht erreichbar.","es":"No se pudo contactar con la diana.","nl":"Bord niet bereikbaar."},"remote.setup.title":{"en":"Set up this board","fr":"Configurer cette cible","de":"Dieses Board einrichten","es":"Configurar esta diana","nl":"Dit bord instellen"},"remote.setup.sub":{"en":"This board is new. Create the owner account — you will sign in with it to change anything venue-wide.","fr":"Cette cible est neuve. Crée le compte propriétaire : tu t'y connecteras pour tout changement général.","de":"Dieses Board ist neu. Lege das Inhaber-Konto an — damit meldest du dich für alle venue-weiten Änderungen an.","es":"Esta diana es nueva. Crea la cuenta del propietario: con ella entrarás para cambiar cualquier cosa del local.","nl":"Dit bord is nieuw. Maak het eigenaarsaccount aan — daarmee log je in voor alles wat de hele locatie raakt."},"remote.setup.name":{"en":"Your name","fr":"Ton nom","de":"Dein Name","es":"Tu nombre","nl":"Jouw naam"},"remote.setup.go":{"en":"Set up the board","fr":"Configurer la cible","de":"Board einrichten","es":"Configurar la diana","nl":"Bord instellen"},"remote.setup.needName":{"en":"Enter your name.","fr":"Saisis ton nom.","de":"Gib deinen Namen ein.","es":"Escribe tu nombre.","nl":"Vul je naam in."},"remote.setup.mismatch":{"en":"The two PINs do not match.","fr":"Les deux codes ne correspondent pas.","de":"Die beiden PINs stimmen nicht überein.","es":"Los dos PIN no coinciden.","nl":"De twee codes komen niet overeen."},"remote.setup.taken":{"en":"Somebody just set this board up.","fr":"Quelqu'un vient de configurer cette cible.","de":"Jemand hat dieses Board gerade eingerichtet.","es":"Alguien acaba de configurar esta diana.","nl":"Iemand heeft dit bord net ingesteld."},"remote.setup.failed":{"en":"Setup failed. Try again.","fr":"Échec de la configuration. Réessaie.","de":"Einrichtung fehlgeschlagen. Versuch es erneut.","es":"La configuración falló. Inténtalo de nuevo.","nl":"Instellen mislukt. Probeer opnieuw."},"remote.admin.signIn":{"en":"Sign in","fr":"Se connecter","de":"Anmelden","es":"Entrar","nl":"Inloggen"},"remote.setup.email":{"en":"Your email","fr":"Ton e-mail","de":"Deine E-Mail","es":"Tu correo","nl":"Je e-mail"},"remote.setup.pass":{"en":"Choose a password","fr":"Choisis un mot de passe","de":"Passwort wählen","es":"Elige una contraseña","nl":"Kies een wachtwoord"},"remote.setup.pass2":{"en":"Repeat the password","fr":"Répète le mot de passe","de":"Passwort wiederholen","es":"Repite la contraseña","nl":"Herhaal het wachtwoord"},"remote.setup.badEmail":{"en":"That does not look like an email address.","fr":"Cela ne ressemble pas à une adresse e-mail.","de":"Das sieht nicht nach einer E-Mail-Adresse aus.","es":"Eso no parece una dirección de correo.","nl":"Dat lijkt geen e-mailadres."},"remote.setup.badPass":{"en":"The password needs at least 8 characters.","fr":"Le mot de passe doit faire au moins 8 caractères.","de":"Das Passwort braucht mindestens 8 Zeichen.","es":"La contraseña necesita al menos 8 caracteres.","nl":"Het wachtwoord heeft minstens 8 tekens nodig."},"remote.setup.noToken":{"en":"Scan the setup code on the board screen to set this board up.","fr":"Scanne le code de configuration affiché sur la cible pour la configurer.","de":"Scanne den Einrichtungscode auf dem Board-Bildschirm, um es einzurichten.","es":"Escanea el código de configuración en la pantalla de la diana para configurarla.","nl":"Scan de installatiecode op het bordscherm om dit bord in te stellen."},"remote.admin.email":{"en":"Owner email","fr":"E-mail du propriétaire","de":"E-Mail des Inhabers","es":"Correo del propietario","nl":"E-mail van eigenaar"},"remote.admin.pass":{"en":"Password","fr":"Mot de passe","de":"Passwort","es":"Contraseña","nl":"Wachtwoord"},"remote.admin.lanOnly":{"en":"Sign-in needs the pub's Wi-Fi. Join it and scan the board's code again.","fr":"La connexion nécessite le Wi-Fi du pub. Connectez-vous et scannez à nouveau le code.","de":"Die Anmeldung erfordert das WLAN des Pubs. Verbinde dich und scanne den Code erneut.","es":"El inicio de sesión requiere el Wi-Fi del bar. Conéctate y escanea el código otra vez.","nl":"Inloggen vereist de wifi van de pub. Maak verbinding en scan de code opnieuw."},"remote.boardGone":{"en":"Board not responding","fr":"La cible ne répond pas","de":"Board antwortet nicht","es":"La diana no responde","nl":"Bord reageert niet"},"remote.notSent":{"en":"Not sent — try again","fr":"Non envoyé — réessayez","de":"Nicht gesendet — nochmal versuchen","es":"No enviado — inténtalo de nuevo","nl":"Niet verzonden — probeer opnieuw"},"remote.seat.lanOnly":{"en":"Seats need the pub's Wi-Fi — you can still score from here","fr":"Les places nécessitent le Wi-Fi du pub — vous pouvez toujours marquer","de":"Plätze brauchen das WLAN des Pubs — punkten geht trotzdem","es":"Los puestos requieren el Wi-Fi del bar — aún puedes puntuar","nl":"Plekken vereisen de wifi van de pub — scoren kan wel"},"remote.identifyHint":{"en":"Pick your name above to see the players and your stats.","fr":"Choisis ton nom ci-dessus pour voir les joueurs et tes statistiques.","de":"Wähle oben deinen Namen, um Spieler und deine Statistiken zu sehen.","es":"Elige tu nombre arriba para ver los jugadores y tus estadísticas.","nl":"Kies hierboven je naam om spelers en je statistieken te zien."},"remote.setup.doneTitle":{"en":"This board is yours ✓","fr":"Cette cible est à toi ✓","de":"Dieses Board gehört dir ✓","es":"Esta diana es tuya ✓","nl":"Dit bord is van jou ✓"},"remote.setup.doneBody":{"en":"You are the owner. Sign in with this email on any phone to change venue settings.","fr":"Tu es le propriétaire. Connecte-toi avec cet e-mail depuis n'importe quel téléphone pour changer les réglages du lieu.","de":"Du bist der Inhaber. Melde dich auf jedem Telefon mit dieser E-Mail an, um venue-weite Einstellungen zu ändern.","es":"Eres el propietario. Entra con este correo desde cualquier teléfono para cambiar los ajustes del local.","nl":"Jij bent de eigenaar. Log op elke telefoon in met dit e-mailadres om instellingen voor de locatie te wijzigen."},"remote.setup.doneGo":{"en":"Start playing","fr":"Commencer à jouer","de":"Losspielen","es":"Empezar a jugar","nl":"Beginnen met spelen"},"remote.player.title":{"en":"Sign in to play","fr":"Connecte-toi pour jouer","de":"Zum Spielen anmelden","es":"Entra para jugar","nl":"Log in om te spelen"},"remote.player.sub":{"en":"New here? Create an account — it takes a moment and your stats then follow you to any board.","fr":"Nouveau ? Crée un compte : c'est rapide et tes stats te suivent ensuite sur n'importe quelle cible.","de":"Neu hier? Lege ein Konto an — das dauert einen Moment, danach folgen dir deine Statistiken auf jedes Board.","es":"¿Eres nuevo? Crea una cuenta: es rápido y tus estadísticas te seguirán a cualquier diana.","nl":"Nieuw hier? Maak een account — dat is zo gebeurd en je statistieken volgen je daarna naar elk bord."},"remote.player.go":{"en":"Sign in","fr":"Se connecter","de":"Anmelden","es":"Entrar","nl":"Inloggen"},"remote.player.ok":{"en":"Signed in ✓ — you are in the line-up.","fr":"Connecté ✓ — tu es dans la composition.","de":"Angemeldet ✓ — du bist in der Aufstellung.","es":"Conectado ✓ — estás en la alineación.","nl":"Ingelogd ✓ — je staat in de opstelling."},"remote.player.wrong":{"en":"That email and password did not match.","fr":"Cet e-mail et ce mot de passe ne correspondent pas.","de":"E-Mail und Passwort passen nicht.","es":"Ese correo y contraseña no coinciden.","nl":"Dat e-mailadres en wachtwoord komen niet overeen."},"remote.player.offline":{"en":"Could not reach the account service. Try again in a moment.","fr":"Service de comptes injoignable. Réessaie dans un instant.","de":"Kontodienst nicht erreichbar. Versuche es gleich noch einmal.","es":"No se pudo contactar con el servicio de cuentas. Inténtalo en un momento.","nl":"Accountdienst niet bereikbaar. Probeer het zo nog eens."},"remote.player.register":{"en":"Create account","fr":"Créer un compte","de":"Konto anlegen","es":"Crear cuenta","nl":"Account aanmaken"},"remote.player.registered":{"en":"Account created. Check your email to confirm it, then sign in.","fr":"Compte créé. Confirme-le via l'e-mail reçu, puis connecte-toi.","de":"Konto angelegt. Bestätige es per E-Mail und melde dich dann an.","es":"Cuenta creada. Confírmala desde el correo y luego entra.","nl":"Account aangemaakt. Bevestig het via de e-mail en log daarna in."},"remote.player.taken":{"en":"That email already has an account — sign in instead.","fr":"Cet e-mail a déjà un compte — connecte-toi.","de":"Für diese E-Mail gibt es schon ein Konto — melde dich an.","es":"Ese correo ya tiene cuenta: entra en su lugar.","nl":"Dat e-mailadres heeft al een account — log in."},"remote.player.badPass":{"en":"Pick a password of at least 8 characters.","fr":"Choisis un mot de passe d'au moins 8 caractères.","de":"Wähle ein Passwort mit mindestens 8 Zeichen.","es":"Elige una contraseña de al menos 8 caracteres.","nl":"Kies een wachtwoord van minstens 8 tekens."},"remote.player.useBoardPass":{"en":"Use the board's own password","fr":"Utiliser le mot de passe de la cible","de":"Passwort des Boards verwenden","es":"Usar la contraseña de la diana","nl":"Wachtwoord van het bord gebruiken"},"remote.owner.title":{"en":"Owner account","fr":"Compte propriétaire","de":"Inhaber-Konto","es":"Cuenta del propietario","nl":"Eigenaarsaccount"},"remote.owner.change":{"en":"Change email or password","fr":"Changer l'e-mail ou le mot de passe","de":"E-Mail oder Passwort ändern","es":"Cambiar correo o contraseña","nl":"E-mail of wachtwoord wijzigen"},"remote.owner.sub":{"en":"Enter the current details to prove it is you, then whichever one you want to change. Everyone signed in as admin is signed out.","fr":"Saisis les identifiants actuels pour prouver que c'est toi, puis ce que tu veux changer. Toutes les sessions admin sont déconnectées.","de":"Gib die aktuellen Daten ein, um dich auszuweisen, und dann das, was du ändern willst. Alle Admin-Sitzungen werden abgemeldet.","es":"Introduce los datos actuales para demostrar que eres tú y luego lo que quieras cambiar. Se cierran todas las sesiones de administrador.","nl":"Vul de huidige gegevens in om te bewijzen dat jij het bent, en daarna wat je wilt wijzigen. Alle adminsessies worden afgemeld."},"remote.owner.curEmail":{"en":"Current email","fr":"E-mail actuel","de":"Aktuelle E-Mail","es":"Correo actual","nl":"Huidig e-mailadres"},"remote.owner.curPass":{"en":"Current password","fr":"Mot de passe actuel","de":"Aktuelles Passwort","es":"Contraseña actual","nl":"Huidig wachtwoord"},"remote.owner.newEmail":{"en":"New email (optional)","fr":"Nouvel e-mail (facultatif)","de":"Neue E-Mail (optional)","es":"Correo nuevo (opcional)","nl":"Nieuw e-mailadres (optioneel)"},"remote.owner.newPass":{"en":"New password (optional)","fr":"Nouveau mot de passe (facultatif)","de":"Neues Passwort (optional)","es":"Contraseña nueva (opcional)","nl":"Nieuw wachtwoord (optioneel)"},"remote.owner.save":{"en":"Save","fr":"Enregistrer","de":"Speichern","es":"Guardar","nl":"Opslaan"},"remote.owner.done":{"en":"Saved. Sign in again with the new details.","fr":"Enregistré. Reconnecte-toi avec les nouveaux identifiants.","de":"Gespeichert. Melde dich mit den neuen Daten wieder an.","es":"Guardado. Vuelve a iniciar sesión con los datos nuevos.","nl":"Opgeslagen. Log opnieuw in met de nieuwe gegevens."},"remote.owner.wrong":{"en":"That email and password did not match this board.","fr":"Cet e-mail et ce mot de passe ne correspondent pas à cette cible.","de":"E-Mail und Passwort passen nicht zu diesem Board.","es":"Ese correo y esa contraseña no coinciden con esta diana.","nl":"Dat e-mailadres en wachtwoord horen niet bij dit bord."},"remote.owner.needCurrent":{"en":"Enter the current email and password first.","fr":"Saisis d'abord l'e-mail et le mot de passe actuels.","de":"Gib zuerst die aktuelle E-Mail und das aktuelle Passwort ein.","es":"Introduce primero el correo y la contraseña actuales.","nl":"Vul eerst het huidige e-mailadres en wachtwoord in."},"remote.owner.needNew":{"en":"Fill in a new email or a new password — otherwise there is nothing to change.","fr":"Indique un nouvel e-mail ou un nouveau mot de passe — sinon il n'y a rien à changer.","de":"Gib eine neue E-Mail oder ein neues Passwort an — sonst gibt es nichts zu ändern.","es":"Pon un correo nuevo o una contraseña nueva; si no, no hay nada que cambiar.","nl":"Vul een nieuw e-mailadres of wachtwoord in — anders valt er niets te wijzigen."},"remote.owner.badPass":{"en":"Pick a new password of at least 8 characters.","fr":"Choisis un nouveau mot de passe d'au moins 8 caractères.","de":"Wähle ein neues Passwort mit mindestens 8 Zeichen.","es":"Elige una contraseña nueva de al menos 8 caracteres.","nl":"Kies een nieuw wachtwoord van minstens 8 tekens."},"remote.owner.badEmail":{"en":"That new email does not look like an address.","fr":"Ce nouvel e-mail ne ressemble pas à une adresse.","de":"Die neue E-Mail sieht nicht wie eine Adresse aus.","es":"Ese correo nuevo no parece una dirección.","nl":"Dat nieuwe e-mailadres ziet er niet uit als een adres."},"remote.owner.locked":{"en":"Too many attempts. Wait half a minute and try again.","fr":"Trop de tentatives. Attends une demi-minute et réessaie.","de":"Zu viele Versuche. Warte eine halbe Minute und versuche es erneut.","es":"Demasiados intentos. Espera medio minuto y vuelve a intentarlo.","nl":"Te veel pogingen. Wacht een halve minuut en probeer opnieuw."},"remote.owner.failed":{"en":"Could not save that. Try again.","fr":"Impossible d'enregistrer. Réessaie.","de":"Konnte nicht gespeichert werden. Versuche es erneut.","es":"No se ha podido guardar. Inténtalo de nuevo.","nl":"Kon dit niet opslaan. Probeer het opnieuw."},"remote.card.title":{"en":"Your card","fr":"Ta carte","de":"Deine Karte","es":"Tu tarjeta","nl":"Jouw kaart"},"remote.card.sub":{"en":"A card carries your stats to a board that has never seen you. Get one here, then type it into that board when you arrive.","fr":"Une carte emmène tes stats sur une cible qui ne te connaît pas. Prends-en une ici, puis saisis-la sur cette cible en arrivant.","de":"Eine Karte bringt deine Statistiken auf ein Board, das dich noch nie gesehen hat. Hol dir hier eine und gib sie dort ein, wenn du ankommst.","es":"Una tarjeta lleva tus estadísticas a una diana que no te conoce. Consigue una aquí y escríbela en esa diana al llegar.","nl":"Een kaart neemt je statistieken mee naar een bord dat je nog nooit heeft gezien. Haal er hier een en voer die daar in als je aankomt."},"remote.card.get":{"en":"Get a card","fr":"Obtenir une carte","de":"Karte holen","es":"Obtener tarjeta","nl":"Kaart ophalen"},"remote.card.working":{"en":"Getting one…","fr":"Récupération…","de":"Wird geholt…","es":"Obteniendo…","nl":"Ophalen…"},"remote.card.ok":{"en":"Here it is — copy it now. It is shown once and cannot be shown again.","fr":"La voici — copie-la maintenant. Elle s'affiche une seule fois et ne peut pas être réaffichée.","de":"Hier ist sie — kopiere sie jetzt. Sie wird nur einmal angezeigt und kann nicht erneut angezeigt werden.","es":"Aquí está: cópiala ahora. Se muestra una sola vez y no se puede volver a mostrar.","nl":"Hier is hij — kopieer hem nu. Hij wordt één keer getoond en kan niet opnieuw worden getoond."},"remote.card.failed":{"en":"Could not make a card for this account.","fr":"Impossible de créer une carte pour ce compte.","de":"Für dieses Konto konnte keine Karte erstellt werden.","es":"No se ha podido crear una tarjeta para esta cuenta.","nl":"Kon geen kaart maken voor dit account."},"remote.card.offline":{"en":"Could not reach the account service. Try again in a moment.","fr":"Impossible de joindre le service de comptes. Réessaie dans un instant.","de":"Kontodienst nicht erreichbar. Versuche es gleich noch einmal.","es":"No se ha podido contactar con el servicio de cuentas. Inténtalo en un momento.","nl":"Kon de accountservice niet bereiken. Probeer het zo nog eens."},"remote.card.signIn":{"en":"Sign in first — a card belongs to an account.","fr":"Connecte-toi d'abord — une carte appartient à un compte.","de":"Melde dich zuerst an — eine Karte gehört zu einem Konto.","es":"Inicia sesión primero: una tarjeta pertenece a una cuenta.","nl":"Log eerst in — een kaart hoort bij een account."},"remote.player.checking":{"en":"Checking…","fr":"Vérification…","de":"Wird geprüft…","es":"Comprobando…","nl":"Controleren…"},"remote.player.needFields":{"en":"Enter an email address and a password.","fr":"Saisis un e-mail et un mot de passe.","de":"Gib eine E-Mail-Adresse und ein Passwort ein.","es":"Introduce un correo y una contraseña.","nl":"Vul een e-mailadres en een wachtwoord in."}};
+  var LANG = "de";   // baked in by the server: no flash of English on first paint
+  var prCache = {};
+
+  function look(lang, key){ var e = I18N[key]; return (e && e[lang]) ? e[lang] : null; }
+  function plural(lang, count){
+    if (!(lang in prCache)) { try { prCache[lang] = new Intl.PluralRules(lang); } catch(e){ prCache[lang] = null; } }
+    var pr = prCache[lang];
+    return pr ? pr.select(count) : (count === 1 ? "one" : "other");
+  }
+  function T(key, vars){
+    var str = null;
+    if (vars && typeof vars.count === "number") {
+      var c = plural(LANG, vars.count);
+      str = look(LANG, key + "_" + c) || look("en", key + "_" + c) || look(LANG, key + "_other") || look("en", key + "_other");
+    }
+    if (str == null) str = look(LANG, key) || look("en", key);
+    if (str == null) return key;
+    if (vars) str = str.replace(/\{(\w+)\}/g, function(m, k){ return vars[k] == null ? m : String(vars[k]); });
+    return str;
+  }
+  // Re-translates every statically-marked node. Called on load and on each
+  // language change; the dynamic strings are re-rendered by renderAll().
+  function applyI18n(){
+    document.documentElement.lang = LANG;
+    document.title = T("remote.title");
+    var a = document.querySelectorAll("[data-t]");
+    for (var i=0;i<a.length;i++) a[i].textContent = T(a[i].dataset.t);
+    var b = document.querySelectorAll("[data-tph]");
+    for (var j=0;j<b.length;j++) b[j].placeholder = T(b[j].dataset.tph);
+  }
+
+  // ---- RELAY TRANSPORT (optional) -----------------------------------------
+  // Present only on a page EXPORTED with a backend configured
+  // (scripts/build-remote-page.mjs). On the board-served page window.RELAY_CONFIG
+  // is undefined, so every branch below is dead and the LAN behaviour is
+  // untouched — the two pages stay one page.
+  //
+  // The relay exists because the LAN cannot reach a phone on mobile data, or one
+  // on a guest network that blocks device-to-device traffic. Here the 160-bit
+  // join token from the QR replaces the 6-digit code: there is no board-side rate
+  // limiter in front of a public rendezvous, so the secret carries the weight
+  // alone.
+  var relayCfg = (typeof window !== "undefined" && window.RELAY_CONFIG) || null;
+  var relayToken = "";
+  try { relayToken = new URLSearchParams(location.search).get("t") || ""; } catch (e) {}
+  // Kept like the join code is, so an "Add to Home screen" shortcut still works
+  // once the address bar is gone.
+  if (!relayToken) { try { relayToken = localStorage.getItem("darts_relay_token") || ""; } catch (e) {} }
+  var RELAY = null; // the live client, once connect() builds it
+
+  // The last code that actually paired, kept in this browser / home-screen app's own storage.
+  var stored = localStorage.getItem("darts_remote_code") || "";
+  // Scanning the desktop QR lands here with ?c=<code>. #236 keeps that code in the url (not just
+  // in storage) so an "Add to Home Screen" shortcut is self-contained: an iOS home-screen app
+  // gets its own storage area and has no address bar, so the url is the only code it carries —
+  // stripping it made the icon demand the 6-digit code every single launch.
+  //
+  // AUDIT-V17: but that url is FROZEN when the shortcut/bookmark is saved, so once the host
+  // rotates the code it goes stale. We must NOT blindly persist ?c= over a good stored code —
+  // that re-clobbered a freshly re-paired code on EVERY launch and demanded the code forever. So
+  // PREFER the stored code and treat ?c= only as a fallback, and persist a code ONLY when it
+  // actually pairs (see the auto-pair below), never speculatively from the url.
+  var qcode = "";
+  try { qcode = new URLSearchParams(location.search).get("c") || ""; } catch (e) {}
+  var code = stored || qcode;
+  var mult = 1;
+  var es = null;
+  // This phone's session, handed out by the server on connect. Kept so a phone
+  // that drops off Wi-Fi (or gets locked in a pocket) comes back as ITSELF —
+  // same seat — instead of arriving as a stranger.
+  var sid = localStorage.getItem("darts_remote_sid") || "";
+  var state = null;       // latest snapshot from the desktop
+  var seats = null;       // { taken:[...], phones:n } — who else is on this board
+  var mySeat = null;      // the player THIS phone is throwing for, per the server
+  var isAdmin = false;    // is this session signed in as the board owner, per the server
+  var setupDone = false;  // just claimed this board: show the confirmation until dismissed
+  // Only the SETUP QR carries this. Without it the board cannot be claimed, which
+  // is what keeps setup and joining separate entry points.
+  var setupToken = "";
+  try { setupToken = new URLSearchParams(location.search).get("setup") || ""; } catch (e) {}
+  var pickedTab = false;  // has the first state chosen a compartment for us yet
+  var draggingSlider = null;
+  var $ = function(id){ return document.getElementById(id); };
+  function el(tag, cls, txt){ var e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; }
+  // Same, but from a catalog key: tags the node with data-t so applyI18n() picks
+  // it up on a language change without the builder having to run again.
+  function elT(tag, cls, key){ var e = el(tag, cls, T(key)); e.dataset.t = key; return e; }
+
+  function flash(){ var f=$("flash"); f.classList.add("show"); setTimeout(function(){ f.classList.remove("show"); }, 120); }
+  // AUDIT-V19 muted input on an evicted phone, because an evicted phone kept full
+  // command authority over the live game while its own board sat frozen — a pocket
+  // tap scored against whoever was actually at the oche. Phones are no longer
+  // evicted, so there is no frozen-but-armed state left to guard against.
+  //
+  // sid rides along so the server knows WHICH phone is asking. Only the seat
+  // command cares; a dart is a dart whoever taps it.
+  // ⚠️ AUDIT-V22 #3: the flash and the vibration used to fire BEFORE the request, and the status
+  // code was thrown away — so a dart the server rejected as out-of-turn looked and felt exactly
+  // like one that scored. A silently discarded dart is worse than a refused one: the player sees
+  // a confirmation, the board does not move, and they tap again. Confirm only what the server
+  // accepted, and say so when it did not.
+  function post(cmd){
+    // Over the relay the command is queued for the board to drain, so there is no
+    // status to read here — a refusal comes back later on this phone's own
+    // channel as "cmderr". The optimistic flash is therefore the honest response
+    // either way: the tap was accepted, and if the board disagrees it will say so.
+    if (RELAY) {
+      return RELAY.send(cmd).then(function(r){
+        // HONOUR THE RESULT, the way the LAN branch honours its status.
+        // (AUDIT-RELAY #7)
+        //
+        // This used to flash and buzz whatever came back, so a queue jammed at its
+        // 200-row cap — which any token holder could do — confirmed every dart
+        // while the scoreboard never moved. A refusal is not a dart.
+        if (!r || !r.ok) { seatMsg(r && r.reason === "offline" ? "remote.noReach" : "remote.notSent"); return false; }
+        flash();
+        if (navigator.vibrate) { try { navigator.vibrate(12); } catch(e){} }
+        return true;
+      }).catch(function(){ seatMsg("remote.noReach"); return false; });
+    }
+    var q = "/cmd?code=" + encodeURIComponent(code) + (sid ? "&sid=" + encodeURIComponent(sid) : "");
+    return fetch(q, { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(cmd), keepalive:true })
+      .then(function(r){
+        if (r && r.status === 409) { seatMsg("remote.notYourTurn"); showTab("player"); return false; }
+        flash();
+        if (navigator.vibrate) { try { navigator.vibrate(12); } catch(e){} }
+        return true;
+      })
+      .catch(function(){ flash(); return true; });   // offline: keep the old optimistic feel
+  }
+
+  // ================= SCORE (dartpad) =================
+  function setMult(m){ mult = m; var b = document.querySelectorAll("#mult button"); for (var i=0;i<b.length;i++) b[i].classList.toggle("sel", Number(b[i].dataset.m)===m); var nb = document.getElementById("nums"); if (nb) nb.dataset.mult = m; } // #175: number outlines follow the multiplier
+  function throwDart(value, m){ post({ type:"dart", value:value, mult:(m||mult) }); setMult(1); }
+  var nums = $("nums");
+  for (var n=1;n<=20;n++){ (function(n){ var btn = el("button", null, String(n)); btn.addEventListener("click", function(){ throwDart(n); }); nums.appendChild(btn); })(n); }
+  var mbtns = document.querySelectorAll("#mult button");
+  for (var i=0;i<mbtns.length;i++){ (function(b){ b.addEventListener("click", function(){ setMult(Number(b.dataset.m)); }); })(mbtns[i]); }
+  $("bull").addEventListener("click", function(){ throwDart(25, mult===2?2:1); });
+  $("miss").addEventListener("click", function(){ throwDart(0, 1); });
+  $("undo").addEventListener("click", function(){ post({ type:"undo" }); });
+
+  // Camera-board control (calibrate / reset / start / stop): fire the action to the PC, which
+  // relays it to the board manager. A short vibrate + a brief "busy" fade is the tap ack — the
+  // physical board reacts and the PC shows the result toast; a screen flash (the dart ack) would
+  // read as "a dart scored", so it is deliberately not used here. Busy also debounces double-taps.
+  var bctls = document.querySelectorAll("#boardctl .bctl");
+  for (var bi=0;bi<bctls.length;bi++){ (function(btn){
+    btn.addEventListener("click", function(){
+      if (btn.classList.contains("busy")) return;
+      if (navigator.vibrate) { try { navigator.vibrate(18); } catch(e){} }
+      btn.classList.add("busy");
+      setTimeout(function(){ btn.classList.remove("busy"); }, 900);
+      // Board control (reset/calibrate/start/stop). Routed through post() rather
+      // than a raw relative fetch, which on the exported page would go to the
+      // static host instead of the board. Unreachable over the relay today —
+      // it sits behind admin, and admin needs a sign-in the relay refuses — but a
+      // second /cmd that ignores the transport is exactly what AUDIT-RELAY #11
+      // was. (post() flashes, which is the same confirmation the pad gives.)
+      post({ type:"board", action: btn.dataset.ba });
+    });
+  })(bctls[bi]); }
+
+  function renderScore(g){
+    if (!g){ $("curName").textContent = T("remote.noGame"); $("curScore").textContent=""; $("darts").innerHTML=""; $("others").innerHTML=""; return; }
+    var cur = (g.players||[])[g.currentIdx] || null;
+    // A full sentence with a {name} placeholder — never a translated fragment
+    // concatenated onto the name: Spanish puts the verb first ("Gana Ana").
+    if (g.over && g.winnerName){ $("curName").textContent = T("remote.wins", { name: g.winnerName }); $("curScore").textContent=""; }
+    else { $("curName").textContent = cur ? cur.name : "—"; $("curScore").textContent = (cur && cur.score!=null) ? cur.score : ""; }
+    var darts = $("darts"); darts.innerHTML="";
+    var tt = g.turnThrows || [];
+    for (var i=0;i<3;i++){ var c = el("div", "chip" + (tt[i] ? " filled" : ""), tt[i] ? (tt[i].label||"") : "·"); darts.appendChild(c); }
+    var others = $("others"); others.innerHTML="";
+    (g.players||[]).forEach(function(p, idx){ if (idx===g.currentIdx) return; others.appendChild(el("div", "other", p.name + (p.score!=null ? " · " + p.score : ""))); });
+  }
+
+  // ================= MENU (navigation) =================
+  // it[0] is a WIRE TOKEN — the screen id in {type:"nav"} and in data-nav, matched
+  // against state.screen. It is never translated; only it[2], the label, is.
+  var NAV = [["home","🏠","remote.nav.home"],["stats","👥","remote.nav.stats"],["party","🎉","remote.nav.party"],["leagues","🏆","remote.nav.leagues"],["recordings","🎬","remote.nav.recordings"],["settings","⚙️","remote.nav.settings"]];
+  (function(){ var box = $("menu-list"); NAV.forEach(function(it){ var b = el("button"); b.dataset.nav = it[0]; b.appendChild(el("span","ic",it[1])); b.appendChild(elT("span",null,it[2])); b.addEventListener("click", function(){ post({ type:"nav", screen:it[0] }); }); box.appendChild(b); }); })();
+  function renderMenu(s){ document.querySelectorAll("#menu-list button").forEach(function(b){ b.classList.toggle("on", b.dataset.nav === s.screen); }); }
+
+  // ================= PLAYERS =================
+  $("pl-add").addEventListener("click", function(){ var v=($("pl-name").value||"").trim(); if(!v) return; post({ type:"add-player", name:v }); $("pl-name").value=""; });
+  $("pl-name").addEventListener("keydown", function(e){ if (e.key==="Enter"){ e.preventDefault(); $("pl-add").click(); } });
+  $("pl-start").addEventListener("click", function(){ post({ type:"start" }); });
+  // it[0] is a WIRE TOKEN — the "level" in {type:"add-bot"}, which the desktop
+  // matches literally. Translating it would break the remote; only the label moves.
+  (function(){ var box = $("pl-bots"); [["beginner","remote.bot.beginner"],["medium","remote.bot.medium"],["pro","remote.bot.pro"]].forEach(function(it){ var b = elT("button","chipb",it[1]); b.addEventListener("click", function(){ post({ type:"add-bot", level:it[0] }); }); box.appendChild(b); }); })();
+
+  function renderPlayers(s){
+    // modes
+    var mb = $("pl-modes"); mb.innerHTML="";
+    (s.modes||[]).forEach(function(m){ var b = el("button","chipb" + (m.id===s.pickMode?" on":""), m.name); b.addEventListener("click", function(){ post({ type:"pick-mode", mode:m.id }); }); mb.appendChild(b); });
+    // lineup
+    var lu = $("pl-lineup"); lu.innerHTML="";
+    var filled = 0;
+    (s.lineup||[]).forEach(function(slot, idx){
+      if (!slot){ var er = el("div","lu-row empty"); er.appendChild(elT("span","lu-name","remote.emptySlot")); lu.appendChild(er); return; }
+      filled++;
+      var row = el("div","lu-row");
+      row.appendChild(el("span","lu-name", slot.name));
+      var x = el("button","x","✕"); x.addEventListener("click", (function(i){ return function(){ post({ type:"remove-slot", index:i }); }; })(idx)); row.appendChild(x);
+      lu.appendChild(row);
+    });
+    // saved profiles (highlight those already in the lineup)
+    var pb = $("pl-profiles"); pb.innerHTML="";
+    var inLineup = {}; (s.lineup||[]).forEach(function(sl){ if (sl && sl.id) inLineup[sl.id]=1; });
+    (s.profiles||[]).slice(0, 60).forEach(function(p){ var b = el("button","chipb" + (inLineup[p.id]?" on":""), p.name); b.addEventListener("click", function(){ post({ type:"toggle-lineup", id:p.id }); }); pb.appendChild(b); });
+    if (!(s.profiles||[]).length) pb.appendChild(elT("span","hint","remote.noProfiles"));
+    // start enabled only with >=2 in the line-up
+    $("pl-start").disabled = filled < 2;
+    $("pl-start").textContent = filled < 2 ? T("remote.needPlayers") : T("remote.startGame");
+  }
+
+  // ================= SETTINGS =================
+  // In every table below the FIRST column is a WIRE TOKEN — the settings key, and
+  // for the segmented options the value — that the desktop's allow-list matches
+  // literally in {type:"setting"}. Only the label column is a catalog key.
+  // A null option label means "render the raw value" (the timer's "20s" etc: a
+  // number plus a unit symbol, which is the same in all five languages).
+  var TOGGLES = [["soundOn","remote.set.sound"],["caller","remote.set.caller"],["atmosphere","remote.set.atmosphere"],["atmosphereSound","remote.set.atmosphereSound"]];
+  var SLIDERS = [["masterVolume","remote.set.masterVolume",0,100,1,function(v){ return Math.round(v)+"%"; }],["uiScale","remote.set.boardScale",0.8,4,0.1,function(v){ return (+v).toFixed(1)+"×"; }]];
+  var SEGS = [
+    ["voiceGender","remote.set.voiceGender",[["female","remote.set.female"],["male","remote.set.male"]],false],
+    ["walkOn","remote.set.walkOn",[["off","remote.set.off"],["first","remote.set.firstLeg"],["every","remote.set.everyLeg"]],false]
+  ];
+  var settingsBuilt = false;
+  function buildSettings(){
+    var body = $("set-body"); body.innerHTML="";
+    body.appendChild(elT("div","sec","remote.set.soundCaller"));
+    TOGGLES.forEach(function(t){ body.appendChild(makeToggle(t[0], t[1])); });
+    SLIDERS.forEach(function(sl){ if (sl[0]==="masterVolume") body.appendChild(makeSlider(sl)); });
+    SEGS.forEach(function(sg){ if (sg[0]==="voiceGender") body.appendChild(makeSeg(sg)); });
+    body.appendChild(elT("div","sec","remote.set.presentation"));
+    SEGS.forEach(function(sg){ if (sg[0]==="walkOn") body.appendChild(makeSeg(sg)); });
+    SLIDERS.forEach(function(sl){ if (sl[0]==="uiScale") body.appendChild(makeSlider(sl)); });
+    settingsBuilt = true;
+  }
+  function makeToggle(key, labelKey){
+    var row = el("div","srow"); row.appendChild(elT("span","lab",labelKey));
+    var t = el("button","tog"); t.dataset.key=key; t.addEventListener("click", function(){ var on = !t.classList.contains("on"); t.classList.toggle("on", on); post({ type:"setting", key:key, value:on }); });
+    row.appendChild(t); return row;
+  }
+  function makeSlider(sl){
+    var row = el("div","srow col");
+    var head = el("div"); head.style.display="flex"; head.style.justifyContent="space-between";
+    head.appendChild(elT("span","lab",sl[1])); var val = el("span","val","—"); val.dataset.for=sl[0]; head.appendChild(val); row.appendChild(head);
+    var r = el("input"); r.type="range"; r.min=sl[2]; r.max=sl[3]; r.step=sl[4]; r.dataset.key=sl[0];
+    r.addEventListener("pointerdown", function(){ draggingSlider=r; });
+    window.addEventListener("pointerup", function(){ if(draggingSlider===r) draggingSlider=null; });
+    r.addEventListener("input", function(){ val.textContent = sl[5](r.value); });
+    r.addEventListener("change", function(){ post({ type:"setting", key:sl[0], value:Number(r.value) }); });
+    row.appendChild(r); return row;
+  }
+  function makeSeg(sg){
+    var row = el("div","srow col"); row.appendChild(elT("span","lab",sg[1]));
+    var seg = el("div","seg"); seg.dataset.key=sg[0]; seg.dataset.num=sg[3]?"1":"0";
+    sg[2].forEach(function(o){ var b = o[1] ? elT("button",null,o[1]) : el("button",null,String(o[0])+"s"); b.dataset.val=String(o[0]); b.addEventListener("click", function(){ post({ type:"setting", key:sg[0], value:(sg[3]?Number(o[0]):o[0]) }); }); seg.appendChild(b); });
+    row.appendChild(seg); return row;
+  }
+  function renderSettings(s){
+    if (!s) return;
+    if (!settingsBuilt) buildSettings();
+    document.querySelectorAll("#set-body .tog").forEach(function(t){ t.classList.toggle("on", !!s[t.dataset.key]); });
+    document.querySelectorAll("#set-body input[type=range]").forEach(function(r){
+      if (r === draggingSlider) return;
+      var k = r.dataset.key; if (s[k]==null) return;
+      r.value = s[k]; var v = document.querySelector('.val[data-for="'+k+'"]');
+      if (v){ var sl = SLIDERS.filter(function(x){return x[0]===k;})[0]; v.textContent = sl ? sl[5](s[k]) : s[k]; }
+    });
+    document.querySelectorAll("#set-body .seg").forEach(function(seg){
+      var k = seg.dataset.key, num = seg.dataset.num==="1";
+      var cur = String(s[k]);
+      seg.querySelectorAll("button").forEach(function(b){ b.classList.toggle("on", b.dataset.val === cur); });
+    });
+  }
+
+  // ================= SUGGEST =================
+  // #173: the idea/bug/note selector was removed — everything is filed as "idea" (the
+  // approval-required type), so nothing auto-ships unreviewed.
+  // #262: a photo taken on the phone, squeezed HERE before it crosses the LAN. The ladder and
+  // the 26000-char budget mirror src/lib/imageAttach.js — this file cannot import from src/
+  // (it ships without it), so the numbers are duplicated on purpose and must move together.
+  var sugImage = null;
+  var IMG_STEPS = [[1024,0.72],[900,0.66],[800,0.6],[720,0.55],[640,0.5],[560,0.45],[480,0.4]];
+  function fitPhoto(file, done){
+    var rd = new FileReader();
+    rd.onerror = function(){ done(null); };
+    rd.onload = function(){
+      var im = new Image();
+      im.onerror = function(){ done(null); };
+      im.onload = function(){
+        var cv = document.createElement("canvas"), cx = cv.getContext("2d");
+        for (var i=0;i<IMG_STEPS.length;i++){
+          var w = IMG_STEPS[i][0], q = IMG_STEPS[i][1];
+          var s = Math.min(1, w / Math.max(im.width, im.height));
+          cv.width = Math.max(1, Math.round(im.width*s)); cv.height = Math.max(1, Math.round(im.height*s));
+          cx.imageSmoothingEnabled = true; cx.imageSmoothingQuality = "high";
+          cx.drawImage(im, 0, 0, cv.width, cv.height);
+          var url = cv.toDataURL("image/jpeg", q);
+          if (url.length - url.indexOf(",") - 1 <= 26000) { done(url); return; }
+        }
+        done(null); // even the smallest rung is too big — say so rather than send a broken image
+      };
+      im.src = rd.result;
+    };
+    rd.readAsDataURL(file);
+  }
+  function showThumb(url){ sugImage = url; $("sugThumbWrap").style.display = url ? "" : "none"; $("sug-photo").style.display = url ? "none" : ""; if (url) $("sugThumb").src = url; }
+  $("sug-photo").addEventListener("click", function(){ $("sugPhoto").value=""; $("sugPhoto").click(); });
+  $("sug-photo-clear").addEventListener("click", function(){ showThumb(null); });
+  $("sugPhoto").addEventListener("change", function(e){
+    var f = e.target.files && e.target.files[0]; if(!f) return;
+    var m=$("sugMsg"); m.textContent=T("remote.sug.photoWorking"); m.classList.add("show");
+    fitPhoto(f, function(url){
+      m.classList.remove("show");
+      if(!url){ m.textContent=T("remote.sug.photoTooBig"); m.classList.add("show"); setTimeout(function(){ m.classList.remove("show"); }, 4000); return; }
+      showThumb(url);
+    });
+  });
+  $("sug-send").addEventListener("click", function(){ var t=($("sugText").value||"").trim(); if(!t) return; var cmd={ type:"suggest", text:t, category:"idea" }; if(sugImage) cmd.image=sugImage; post(cmd); $("sugText").value=""; showThumb(null); var m=$("sugMsg"); m.textContent="✓ "+T("remote.sug.saved"); m.classList.add("show"); setTimeout(function(){ m.classList.remove("show"); }, 3500); }); // #199: pop a clear toast on save
+  // Pluralised through the catalog's _one/_other, not an ad-hoc "s".
+  function renderSuggest(s){ var c = s.suggestCount||0; $("sug-count").textContent = c ? T("remote.sug.count", { count: c }) : ""; }
+
+  // ================= tabs + state =================
+  // ================= PLAYER (first-run board setup) =================
+  function suMsg(key){ var m = $("su-msg"); m.dataset.t = key || ""; m.textContent = key ? T(key) : ""; }
+  $("su-go").addEventListener("click", function(){
+    var name = ($("su-name").value||"").trim();
+    var email = ($("su-email").value||"").trim();
+    var p1 = $("su-pass").value||"", p2 = $("su-pass2").value||"";
+    if (!name) { suMsg("remote.setup.needName"); return; }
+    // Backslashes DOUBLED because this line lives inside the page template literal,
+    // where s and . are unrecognised string escapes and the backslash is silently
+    // dropped. It shipped as /^[^@s]+@[^@s.]+.[^@s]+$/ — classes excluding the LETTER s —
+    // so every owner whose address contains an s was told it did not look like an email
+    // and could not set their board up at all.
+    // The backslashes below are DOUBLED, and must stay that way. This line lives inside
+    // the page's template literal, where a single backslash before s or . is an
+    // unrecognised string escape and is silently dropped. It shipped as a class
+    // excluding the LETTER s, so every owner whose address contains one was told it did
+    // not look like an email address and could not set their board up at all.
+    if (!/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(email)) { suMsg("remote.setup.badEmail"); return; }
+    if (p1.length < 8) { suMsg("remote.setup.badPass"); return; }
+    if (p1 !== p2) { suMsg("remote.setup.mismatch"); return; }
+    if (!setupToken) { suMsg("remote.setup.noToken"); return; }
+    suMsg("");
+    var q = "/cmd?code=" + encodeURIComponent(code) + (sid ? "&sid=" + encodeURIComponent(sid) : "");
+    fetch(q, { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify({ type:"claim", name:name, email:email, password:p1, token:setupToken }) })
+      .then(function(r){
+        if (r.ok) return r.json().then(function(j){
+          mySeat = j.seat || null; isAdmin = !!j.admin;
+          // Never leave credentials sitting in the DOM.
+          $("su-pass").value = ""; $("su-pass2").value = "";
+          // Say it plainly, and name the account, because the email is what they will
+          // have to remember to sign in with and they just typed it once.
+          setupDone = true;
+          $("sd-who").textContent = name + " — " + email;
+          renderAdmin(); if (state) renderAll();
+        });
+        // 409: somebody got there first. 403: this page has no valid setup token,
+        // i.e. it came from the join QR rather than the setup QR.
+        suMsg(r.status === 409 ? "remote.setup.taken" : r.status === 403 ? "remote.setup.noToken" : "remote.setup.failed");
+      })
+      .catch(function(){ suMsg("remote.setup.failed"); });
+  });
+
+  // ================= PLAYER (venue admin) =================
+  // The phone can only ever HIDE these controls. The server enforces the gate on
+  // every request, so a hand-rolled POST gets a 403 regardless of what this page
+  // chooses to draw.
+  // Admin and seat both feed applyAccess, so every path that changes either one
+  // ends up here.
+  function renderAdmin(){
+    $("admin-settings").classList.toggle("hidden", !isAdmin);
+    $("admin-nav").classList.toggle("hidden", !isAdmin);
+    // AUDIT-RELAY #11. The sign-in form POSTs to a RELATIVE /cmd — the board on
+    // the board-served page, the STATIC HOST on the exported one. Hidden outright
+    // over the relay, because a form that cannot reach anyone must not be a place
+    // to type a password. Hiding it at boot would not hold: this runs on every
+    // session update and would put it straight back.
+    // The sign-in form is the one at the top now; nothing owner-specific to show.
+    // And no lanOnly notice: signing in DOES work over the relay now, with the cloud
+    // account. Only the board's OWN password is still LAN-only, and playerSignIn says
+    // so at the point it refuses — telling everyone up front that sign-in needs the
+    // pub's Wi-Fi would be false, and would send people away from a working form.
+    applyAccess();
+  }
+  // Sign in with the CLOUD account when the board has one configured, and fall back
+  // to the board's own password otherwise.
+  //
+  // Same form, same two fields — the owner is not asked to know which kind of account
+  // they have. The cloud attempt goes straight from the phone to Supabase, so the
+  // password never reaches the board at all; only the resulting access token does,
+  // and the board hands that back to Supabase to check. The board password remains
+  // the offline route, and it is what a venue with no broadband still uses.
+  // Three outcomes, and they are three because collapsing them cost a password.
+  //
+  //   { token: "..." }   signed in
+  //   { refused: true }  the cloud ANSWERED, and the answer was no
+  //   { nocloud: true }  there was nobody to ask — unreachable, or none configured
+  //
+  // This used to return the token or null, so "your password is wrong" and "the pub's
+  // broadband is down" were the same value — and the caller responded to both by
+  // POSTing the typed password to the board in the clear. A mistyped ACCOUNT password
+  // is the single most likely thing to happen at this form, and it sent that password,
+  // which is a credential for every board this person ever plays on, onto the pub LAN.
+  // (V25-4)
+  function cloudSignIn(email, pass){
+    var c = state && state.cloud;
+    if (!c || !c.url || !c.anonKey) return Promise.resolve({ nocloud: true });
+    return fetch(c.url + "/auth/v1/token?grant_type=password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: c.anonKey },
+      body: JSON.stringify({ email: email, password: pass })
+    })
+      .then(function(r){
+        if (!r.ok) return { refused: true };            // it answered, and it said no
+        return r.json().then(function(j){
+          return (j && j.access_token) ? { token: j.access_token } : { refused: true };
+        });
+      })
+      .catch(function(){ return { nocloud: true }; });  // never reached it at all
+  }
+
+  function plMsg(key){ var m = $("pl-msg"); m.dataset.t = key || ""; m.textContent = key ? T(key) : ""; }
+  // Create the account. Confirmation is NOT optional and is not a setting to relax:
+  // link_client_account and link_player_account both require email_confirmed_at, and
+  // without it anyone could register somebody else's address and become them at every
+  // board they ever play. One-time friction, in exchange for the identity meaning
+  // anything at all.
+  function playerRegister(){
+    var email = ($("pl-email").value||"").trim(), pass = $("pl-pass").value||"";
+    if (!email || !pass) { plMsg("remote.player.needFields"); return; }
+    if (pass.length < 8) { plMsg("remote.player.badPass"); return; }
+    var c = state && state.cloud;
+    // No cloud on this board: there is nothing to register WITH, and saying so beats
+    // a spinner. A board with no project configured is a local-only board.
+    if (!c || !c.url || !c.anonKey) { plMsg("remote.player.offline"); return; }
+    plMsg("");
+    fetch(c.url + "/auth/v1/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: c.anonKey },
+      body: JSON.stringify({ email: email, password: pass })
+    })
+      .then(function(r){
+        $("pl-pass").value = "";
+        if (r.ok) { plMsg("remote.player.registered"); return; }
+        // 422 is Supabase's answer for an address that already has an account.
+        plMsg(r.status === 422 ? "remote.player.taken" : "remote.player.offline");
+      })
+      .catch(function(){ $("pl-pass").value = ""; plMsg("remote.player.offline"); });
+  }
+
+  function cmdPost(body){
+    var q = "/cmd?code=" + encodeURIComponent(code) + (sid ? "&sid=" + encodeURIComponent(sid) : "");
+    return fetch(q, { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(body) });
+  }
+  // What came back from a sign-in the board answered itself.
+  function signedInAs(r){
+    $("pl-pass").value = "";   // never leave it in the DOM
+    if (!r.ok) { plMsg(r.status === 503 ? "remote.player.offline" : "remote.player.wrong"); return; }
+    plMsg("remote.player.ok");
+    boardPassOffer(false);
+    // Only a CLOUD sign-in can mint one — the board-password route proves you own the
+    // board, not that you are a player with an account.
+    cardBox(!!myToken);
+    return r.json().then(function(j){
+      mySeat = j.seat || mySeat; isAdmin = !!j.admin;
+      renderAdmin(); if (state) renderAll();
+    }).catch(function(){});
+  }
+  function boardPassOffer(on){ var b = $("pl-board"); if (b) b.classList.toggle("hidden", !on); }
+
+  // The access token this phone was issued, kept in MEMORY for as long as the page is
+  // open and nowhere else. mint_own_card is an authenticated RPC, so something has to
+  // hold it — and localStorage would leave a bearer credential on the device after the
+  // player has gone home, which is the same objection cardActions.js makes to a board
+  // storing a card. A reload asks them to sign in again; that is the correct price.
+  var myToken = "";
+
+  function playerSignIn(){
+    var email = ($("pl-email").value||"").trim(), pass = $("pl-pass").value||"";
+    if (!email || !pass) { plMsg("remote.player.needFields"); return; }
+    plMsg(""); boardPassOffer(false);
+    cloudSignIn(email, pass)
+      .then(function(out){
+        // With a token this is a cloud account: identity, plus admin if it owns the
+        // board. A token is safe to send anywhere — it is not a password, and the board
+        // re-checks it with Supabase either way.
+        if (out.token) {
+          myToken = out.token;   // for mint_own_card; see the note on myToken
+          // Over the relay a relative /cmd is the STATIC HOST, not the board — the
+          // same trap AUDIT-RELAY #11 named for the password below. A token has a
+          // route the password does not: send it the way every other relay command
+          // goes, and read the answer off this phone's own channel as a "signin"
+          // event, since a queued command has no response to hold open.
+          if (RELAY) {
+            $("pl-pass").value = "";
+            plMsg("remote.player.checking");
+            RELAY.send({ type:"sign-in", token: out.token });
+            return null;
+          }
+          return cmdPost({ type:"sign-in", token: out.token }).then(signedInAs);
+        }
+
+        // NOBODY TO ASK — no project on this board, or the cloud is unreachable. Then
+        // the board's own password is not a fallback, it IS the sign-in, and sending it
+        // is what the person just asked for. This is the offline venue.
+        if (out.nocloud) return boardPassword(email, pass);
+
+        // THE CLOUD ANSWERED NO. Say so, and stop. What used to happen here was a
+        // silent POST of the same password to the board (V25-4) — a wrong account
+        // password, in the clear, on the pub LAN, every time somebody mistyped.
+        //
+        // The board's password is a DIFFERENT secret, set when the board was claimed,
+        // and there is one person who would knowingly type it here: the owner, when
+        // their account does not own this unit (V25-1/3 — without this they had no
+        // route to venue controls at all, because a token that grants no admin ended
+        // the sign-in as a success). So offer it, and let them choose to send it.
+        plMsg("remote.player.wrong");
+        boardPassOffer(true);
+        $("pl-pass").value = "";
+        return null;
+      })
+      .catch(function(){ $("pl-pass").value = ""; plMsg("remote.player.offline"); });
+  }
+
+  // The board's own password, sent only because somebody asked for it by name.
+  function boardPassword(email, pass){
+    // AUDIT-RELAY #11. This posts to a RELATIVE /cmd. On the board-served page that is
+    // the board; on the RELAY-exported page it is the static host, which 404s — so the
+    // password would go to a third party, the sign-in would "fail", and they would type
+    // it again. Refuse before reading the field rather than after posting it.
+    if (relayCfg && relayToken) { $("pl-pass").value = ""; plMsg("remote.admin.lanOnly"); return null; }
+    return cmdPost({ type:"login", email: email, password: pass }).then(signedInAs);
+  }
+
+  // ---- your card ---------------------------------------------------------
+  function cardBox(on){ var b = $("card-box"); if (b) b.classList.toggle("hidden", !on); }
+  function cardMsg(key){ var m = $("card-msg"); m.dataset.t = key || ""; m.textContent = key ? T(key) : ""; }
+
+  // mint_own_card, called STRAIGHT from the phone to Supabase.
+  //
+  // Not through the board, and that is the point of it: 0015 stops a board minting a card
+  // for a player who has an account, because the evidence mint_card checks is written by
+  // the same unit secret it restricts. Nothing here takes a unit secret, so a leaked one
+  // reaches nothing. The board is not involved and does not learn the token.
+  $("card-go").addEventListener("click", function(){
+    var c = state && state.cloud;
+    if (!c || !c.url || !c.anonKey) { cardMsg("remote.card.offline"); return; }
+    if (!myToken) { cardMsg("remote.card.signIn"); return; }
+    cardMsg("remote.card.working");
+    fetch(c.url + "/rest/v1/rpc/mint_own_card", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: c.anonKey, Authorization: "Bearer " + myToken },
+      body: JSON.stringify({ p_label: "phone" })
+    })
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(tok){
+        // PostgREST returns a bare JSON string for a scalar-returning function.
+        if (typeof tok !== "string" || !tok) { cardMsg("remote.card.failed"); return; }
+        var box = $("card-token");
+        box.value = tok;
+        box.classList.remove("hidden");
+        cardMsg("remote.card.ok");
+        // Select it, so "copy" is one gesture on a phone. Not written to storage: the
+        // token is the credential, and it is shown ONCE by design — the server keeps
+        // only its SHA-256 and cannot reissue it.
+        try { box.focus(); box.setSelectionRange(0, box.value.length); } catch(e){}
+      })
+      .catch(function(){ cardMsg("remote.card.offline"); });
+  });
+
+  $("pl-go").addEventListener("click", playerSignIn);
+  $("pl-new").addEventListener("click", playerRegister);
+  $("pl-board").addEventListener("click", function(){
+    var email = ($("pl-email").value||"").trim(), pass = $("pl-pass").value||"";
+    if (!email || !pass) { plMsg("remote.player.needFields"); return; }
+    plMsg("");
+    Promise.resolve(boardPassword(email, pass))
+      .catch(function(){ $("pl-pass").value = ""; plMsg("remote.player.offline"); });
+  });
+  $("pl-pass").addEventListener("keydown", function(e){ if (e.key==="Enter"){ e.preventDefault(); playerSignIn(); } });
+
+  // ---- the owner account -------------------------------------------------
+  // Leave BOTH new fields empty and there is nothing to change; the board refuses that
+  // rather than answering "was this password right?" for free, so say so here first.
+  function owMsg(key){ var m = $("ow-msg"); m.dataset.t = key || ""; m.textContent = key ? T(key) : ""; }
+  $("ow-open").addEventListener("click", function(){ $("ow-form").classList.toggle("hidden"); owMsg(""); });
+  $("ow-go").addEventListener("click", function(){
+    var email = ($("ow-email").value||"").trim(), pass = $("ow-pass").value||"";
+    var nEmail = ($("ow-new-email").value||"").trim(), nPass = $("ow-new-pass").value||"";
+    if (!email || !pass) { owMsg("remote.owner.needCurrent"); return; }
+    if (!nEmail && !nPass) { owMsg("remote.owner.needNew"); return; }
+    if (nPass && nPass.length < 8) { owMsg("remote.owner.badPass"); return; }
+    // AUDIT-RELAY #11 again, and for the same reason: this posts to a RELATIVE /cmd,
+    // which on the exported page is the static host. Two passwords, to a third party.
+    if (relayCfg && relayToken) { $("ow-pass").value = ""; $("ow-new-pass").value = ""; owMsg("remote.admin.lanOnly"); return; }
+    owMsg("");
+    cmdPost({ type:"change-credentials", email: email, password: pass, newEmail: nEmail, newPassword: nPass })
+      .then(function(r){
+        $("ow-pass").value = ""; $("ow-new-pass").value = "";
+        if (r.ok) {
+          owMsg("remote.owner.done");
+          $("ow-email").value = nEmail || email;
+          $("ow-new-email").value = "";
+          // The board revoked every admin session, this one included — the credentials
+          // it was granted against no longer exist. Sign in again with the new ones.
+          return;
+        }
+        if (r.status === 429) { owMsg("remote.owner.locked"); return; }
+        if (r.status === 401) { owMsg("remote.owner.wrong"); return; }
+        return r.text().then(function(t){
+          owMsg(t === "password too short" ? "remote.owner.badPass" : (t === "email invalid" ? "remote.owner.badEmail" : "remote.owner.failed"));
+        }).catch(function(){ owMsg("remote.owner.failed"); });
+      })
+      .catch(function(){ $("ow-pass").value = ""; $("ow-new-pass").value = ""; owMsg("remote.owner.failed"); });
+  });
+
+  $("sd-go").addEventListener("click", function(){ setupDone = false; if (state) renderAll(); });
+
+  // ================= PLAYER (seat) =================
+  function seatMsg(key){ var m = $("seat-msg"); m.dataset.t = key || ""; m.textContent = key ? T(key) : ""; }
+
+  // Who this phone could be: the players in the running game, or — before one
+  // starts — whoever is in the lineup. Bots are excluded: nobody is holding a
+  // phone for them.
+  function seatOptions(s){
+    if (s.game && s.game.players && s.game.players.length) return s.game.players.map(function(p){ return p.name; });
+    return (s.lineup || []).filter(Boolean).filter(function(sl){ return !sl.bot; }).map(function(sl){ return sl.name; });
+  }
+
+  // Claiming needs the RESPONSE (a seat can be refused), so it cannot use post(),
+  // which is deliberately fire-and-forget.
+  function claimSeat(name){
+    // Over the relay this posted to a RELATIVE /cmd, which on the exported page is
+    // the STATIC HOST — it 404'd and the tap did nothing, with no explanation. And
+    // it could not have worked anyway: seat is LAN-only (onRelayCommand refuses
+    // it), because claiming a seat needs a stateful reply the relay has no path
+    // for yet. Say so rather than fail silently. (AUDIT-RELAY 2nd pass)
+    if (relayCfg && relayToken) { seatMsg("remote.seat.lanOnly"); return; }
+    var q = "/cmd?code=" + encodeURIComponent(code) + (sid ? "&sid=" + encodeURIComponent(sid) : "");
+    fetch(q, { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify({ type:"seat", seat:name }) })
+      .then(function(r){
+        if (r.ok) return r.json().then(function(j){ mySeat = j.seat || null; seatMsg(""); applyAccess(); if (state) renderAll(); });
+        seatMsg(r.status === 409 ? "remote.seat.taken" : "remote.seat.failed");
+      })
+      .catch(function(){ seatMsg("remote.seat.failed"); });
+  }
+
+  function renderSeats(s){
+    var box = $("seat-list"); box.innerHTML = "";
+    var names = seatOptions(s);
+    var taken = (seats && seats.taken) || [];
+    if (!names.length) { box.appendChild(elT("div","hint","remote.seat.none")); }
+    names.forEach(function(n){
+      var mine = (n === mySeat);
+      var byOther = !mine && taken.indexOf(n) !== -1;
+      var b = el("button","chipb" + (mine ? " mine" : "") + (byOther ? " busy" : ""), n);
+      b.addEventListener("click", function(){
+        if (byOther) { seatMsg("remote.seat.taken"); return; }
+        claimSeat(mine ? "" : n); // tapping your own seat lets it go
+      });
+      box.appendChild(b);
+    });
+    $("seat-clear").classList.toggle("hidden", !mySeat);
+  }
+  $("seat-clear").addEventListener("click", function(){ claimSeat(""); });
+
+  // ================= STATS =================
+  function statRow(name, cells, on){
+    var row = el("div","st-row" + (on ? " on" : ""));
+    row.appendChild(el("span","nm", name));
+    cells.forEach(function(c){
+      var wrap = el("span");
+      wrap.appendChild(el("span","nu", c[0]));
+      wrap.appendChild(document.createTextNode(" "));
+      wrap.appendChild(elT("span","lb", c[1]));
+      row.appendChild(wrap);
+    });
+    return row;
+  }
+  function renderStats(s){
+    // Live standings, straight off the game snapshot the pad already uses.
+    var sb = $("st-standings"); sb.innerHTML = "";
+    var g = s.game;
+    if (!g || !g.players || !g.players.length) {
+      sb.appendChild(elT("div","hint","remote.stats.noGame"));
+    } else {
+      g.players.forEach(function(p, i){
+        sb.appendChild(statRow(p.name, [[p.score == null ? "—" : String(p.score), "remote.stats.score"]], i === g.currentIdx));
+      });
+    }
+    // Career numbers, for the people at this board only (see App.jsx).
+    var cb = $("st-career"); cb.innerHTML = "";
+    var rows = s.stats || [];
+    if (!rows.length) { cb.appendChild(elT("div","hint","remote.stats.noCareer")); return; }
+    rows.forEach(function(r){
+      // A player with no recorded games gets dashes, not a misleading 0.0 average.
+      var played = r.games > 0;
+      cb.appendChild(statRow(r.name, [
+        [played ? r.avg.toFixed(1) : "—", "remote.stats.avg"],
+        [String(r.games), "remote.stats.games"],
+        [played ? r.pct + "%" : "—", "remote.stats.win"],
+      ]));
+    });
+  }
+
+  var tabBtns = document.querySelectorAll("#tabs button");
+  /**
+   * Three stages, and what each one may SEE.
+   *
+   *   scanned     the live scoreboard, the dartpad, and the seat list. Holding
+   *               the join code means you are in the pub; it does not say who
+   *               you are, so it earns you nothing about anybody else.
+   *   identified  you have taken a seat, so you have said which player you are:
+   *               the venue roster, your career, and the suggestion box.
+   *   owner       signed in: settings, nav and board control (renderAdmin).
+   *
+   * Scoring is deliberately NOT gated. The phone on the wall has to score for
+   * whoever is throwing, including people who have no phone at all — that is
+   * what the unseated shared pad is for. Identity governs what you can SEE.
+   *
+   * Admin implies identified: the landlord signed in with a password, which is
+   * a stronger claim than picking a chair.
+   */
+  function applyAccess(){
+    var identified = !!mySeat || !!isAdmin;
+    // Signed in AND seated: nothing left to ask for.
+    var pl = $("player-login");
+    if (pl) pl.classList.toggle("hidden", !!mySeat);
+    var show = function(id, on){ var e = $(id); if (e) e.classList.toggle("hidden", !on); };
+    show("saved-players", identified);
+    show("sugbox", identified);
+    show("id-hint", !identified);
+    // Selected by ID, not by a [data-tab=...] selector: the source-scanning
+    // test in remote-compartments counts those literals as tab declarations, and a
+    // selector string in the script read as a fourth tab.
+    var statsBtn = $("tab-stats");
+    if (statsBtn) statsBtn.classList.toggle("hidden", !identified);
+    // Never strand someone on a view that has just been taken away from them.
+    var stats = $("view-stats");
+    if (!identified && stats && stats.classList.contains("on")) showTab("game");
+  }
+
+  function showTab(name){ document.querySelectorAll(".view").forEach(function(v){ v.classList.toggle("on", v.id==="view-"+name); }); tabBtns.forEach(function(b){ b.classList.toggle("on", b.dataset.tab===name); }); }
+  tabBtns.forEach(function(b){ b.addEventListener("click", function(){ showTab(b.dataset.tab); }); });
+  // #200: full-screen toggle. Best-effort across browsers (webkit prefixes for older Safari).
+  // #224: iPhone has NO Full Screen API — and on iOS *every* browser is WebKit, so Chrome
+  // there is no different. requestFullscreen is simply undefined, which meant the button
+  // called a no-op fallback and silently did nothing. Feature-detect instead: where the API
+  // exists (Android / iPad / desktop) behave exactly as before; where it does not, swap the
+  // button for the only route iOS actually has — Share › Add to Home Screen, which opens
+  // with no browser chrome at all.
+  (function(){
+    var fb = document.getElementById("fsBtn"); if (!fb) return;
+    var el = document.documentElement;
+    var supported = !!(el.requestFullscreen || el.webkitRequestFullscreen);
+    if (!supported) {
+      // Standalone (already added to the Home Screen) is genuinely full screen — nothing to offer.
+      var standalone = window.navigator.standalone === true ||
+        (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+      if (standalone) { fb.style.display = "none"; return; }
+      fb.setAttribute("data-t", "remote.fullscreenIos");
+      fb.title = T("remote.fullscreenIos");
+      fb.setAttribute("aria-label", T("remote.fullscreenIos"));
+      fb.addEventListener("click", function(){ alert(T("remote.fullscreenIosHow")); });
+      return;
+    }
+    fb.addEventListener("click", function(){
+      try {
+        var d = document;
+        var on = d.fullscreenElement || d.webkitFullscreenElement;
+        if (on) { (d.exitFullscreen || d.webkitExitFullscreen).call(d); }
+        else { (el.requestFullscreen || el.webkitRequestFullscreen).call(el); }
+      } catch (e) {}
+    });
+  })();
+
+  // Keys are the desktop's screen ids (wire tokens); values are catalog keys.
+  var HERE = { home:"remote.here.home", stats:"remote.here.stats", party:"remote.here.party", settings:"remote.here.settings", recordings:"remote.here.recordings", leagues:"remote.here.leagues", setup:"remote.here.setup", play:"remote.here.play", player:"remote.here.player", league:"remote.here.league", compare:"remote.here.compare", test:"remote.here.test" };
+  // #180: follow the PC's theme. The desktop sends its resolved palette with every
+  // state push, so switching theme there re-skins the phone instantly. Unknown/missing
+  // colours are skipped, leaving the built-in defaults — so an older desktop that sends
+  // no palette still works.
+  var THEME_KEYS = ["bg","panel","panel2","line","txt","dim","green","gold","red","accent"];
+  function applyPalette(p){
+    if (!p) return;
+    var root = document.documentElement;
+    THEME_KEYS.forEach(function(k){ if (typeof p[k] === "string" && p[k]) root.style.setProperty("--" + k, p[k]); });
+    if (p.bg) { var m = document.querySelector('meta[name="theme-color"]'); if (m) m.setAttribute("content", p.bg); }
+  }
+  function renderAll(){
+    if (!state) return;
+    applyPalette(state.palette);
+    // Follow the desktop's UI language. Changing it there re-labels the phone on
+    // the next state push: applyI18n() redoes the static nodes, and everything
+    // below re-renders the dynamic ones.
+    if (state.lang && state.lang !== LANG && I18N["remote.title"][state.lang]) { LANG = state.lang; applyI18n(); }
+    $("here").textContent = HERE[state.screen] ? T(HERE[state.screen]) : "";
+    // Camera-board control only makes sense when camera scoring is on — the desktop tells us via
+    // state.cam, and hides it otherwise so the manual dartpad isn't cluttered.
+    // Board control drives the PHYSICAL board (reset/calibrate mid-leg), so it
+    // needs the camera on AND the venue PIN. The server checks both.
+    $("boardctl").classList.toggle("hidden", !state.cam || !isAdmin);
+    renderScore(state.game);
+    renderMenu(state);
+    renderPlayers(state);
+    // An unclaimed board has no owner and therefore no admin; the only thing to
+    // do on it is set it up.
+    var unclaimed = state.claimed === false;
+    $("board-setup").classList.toggle("hidden", !unclaimed);
+    $("setup-done").classList.toggle("hidden", !setupDone);
+    $("player-body").classList.toggle("hidden", unclaimed || setupDone);
+    // …and take the rest of the app away while there is no owner. The server now refuses
+    // every non-claim command on an unclaimed board, so leaving Game reachable would only
+    // offer taps that come back 409 — a set-up screen beside a fully working game menu reads
+    // as "setup is optional", which is exactly the wrong first impression of a venue product.
+    var tabsEl = $("tabs");
+    if (tabsEl) tabsEl.classList.toggle("hidden", unclaimed);
+    if (unclaimed) showTab("player");
+    // applyAccess() shows the id-hint whenever nobody is identified, which on a board
+    // with no owner left "Pick your name above to see the players and your stats" under
+    // a setup form that has no names above it. There is nothing to pick yet.
+    var hint = $("id-hint");
+    if (hint && unclaimed) hint.classList.add("hidden");
+    renderSeats(state);
+    renderStats(state);
+    // The pad and the set-up block swap rather than stack: before a game the pad
+    // scores nothing, and during one the lineup is settled.
+    var live = !!(state.game && !state.game.over);
+    $("board").classList.toggle("hidden", !live);
+    $("pad").classList.toggle("hidden", !live);
+    // A seated phone may only score on its own turn (the server enforces it with a 409). Show
+    // that in the pad rather than letting a tap be swallowed: an UNSEATED phone stays armed, so
+    // the wall dartpad still scores for bots and for players without a phone. (AUDIT-V22 #3)
+    var upNow = live && state.game.players ? state.game.players[state.game.currentIdx] : null;
+    var blocked = !!(mySeat && upNow && upNow.name && upNow.name !== mySeat);
+    $("pad").classList.toggle("notmine", blocked);
+    if (!blocked && $("seat-msg").dataset.t === "remote.notYourTurn") seatMsg("");
+    $("setup").classList.toggle("hidden", live);
+    // First state after connecting picks the compartment: a phone with no seat is
+    // someone who has just walked in and needs to say who they are; a phone that
+    // already holds one wants the pad.
+    if (!pickedTab) { pickedTab = true; showTab(mySeat ? "game" : "player"); }
+    renderSettings(state.settings);
+    renderSuggest(state);
+  }
+
+  // #conn carries data-t so applyI18n() keeps it in step; retag it as the status changes so a
+  // later language switch re-translates whatever it currently says.
+  function setConn(key){ $("conn").dataset.t = key; $("conn").textContent = T(key); }
+  // Back to the 6-digit gate. The host rotates the join code whenever the remote is toggled
+  // off/on (_stop), and the page's only un-pair path was the LOAD-TIME auto-pair — so a phone
+  // left open just sat under the reconnecting label forever: EventSource treats the 403 as a
+  // fatal failure (readyState CLOSED, no further retries), while every dartpad tap kept firing
+  // at the dead code until the per-IP fail counter locked the phone out. Inside an installed
+  // PWA there is no address bar to reload from, so that was a dead end. (AUDIT-V19)
+  function backToPair(msg){
+    if (es) { try { es.close(); } catch(e){} es = null; }
+    forgetStored();
+    // The host rotates the join code on toggle and drops every session with it, so
+    // a stored sid is dead here too. Keeping it would just make the next connect
+    // present a stale id the server has to reject.
+    sid = ""; try { localStorage.removeItem("darts_remote_sid"); } catch(e){}
+    $("app").classList.add("hidden");
+    $("pair").classList.remove("hidden");
+    $("pairErr").textContent = msg ? T(msg) : "";
+  }
+  /**
+   * An EventSource-shaped wrapper around the relay client.
+   *
+   * The page already knows how to consume named events off an EventSource, and
+   * that code is where all the rendering lives. Handing it a look-alike means the
+   * relay reuses every one of those handlers instead of growing a parallel set
+   * that would drift — the same reason the board mirrors its broadcasts as the
+   * SAME events rather than a second shape.
+   */
+  function relaySource(){
+    var listeners = {};
+    if (!sid) { sid = RELAY_PHONE.mintSid(); try { localStorage.setItem("darts_remote_sid", sid); } catch(e){} }
+    RELAY = RELAY_PHONE.createRelayPhone({
+      url: relayCfg.url, anonKey: relayCfg.anonKey, token: relayToken, sid: sid,
+      onEvent: function(name, data){
+        var fn = listeners[name];
+        // Re-serialised so the handlers can JSON.parse(ev.data) exactly as they do
+        // for a real SSE frame. Wasteful by a hair, and worth it to keep one set
+        // of handlers rather than two.
+        if (fn) fn({ data: JSON.stringify(data === undefined ? null : data) });
+      },
+      // The LAN path drives the connection dot from es.onopen / es.onerror, which
+      // this shim has no equivalent of. Without this the phone sat on
+      // "connecting" for ever WHILE WORKING — worse than showing nothing, because
+      // a player reads it as broken and stops trying.
+      onStatus: function(s){
+        // Keyed on live, NOT on joined. The socket is to Supabase and stays up
+        // when the BOARD is switched off — so joined-but-not-live is a phone with
+        // a green dot, flashing and buzzing for darts that reach nobody.
+        // (AUDIT-RELAY #2/#12. No backticks in here: this whole page is a
+        // template literal, and one would end it.)
+        if (s && s.live) { $("dot").classList.add("on"); setConn("remote.connected"); }
+        else { $("dot").classList.remove("on"); setConn(s && s.state === "board-gone" ? "remote.boardGone" : "remote.reconnecting"); }
+      },
+    });
+    RELAY.connect();
+    return {
+      addEventListener: function(n, f){ listeners[n] = f; },
+      close: function(){ try { RELAY.close(); } catch(e){} RELAY = null; },
+    };
+  }
+
+  function connect(){
+    if (es) { try { es.close(); } catch(e){} }
+    // The relay reconnects itself, so there is no code to re-present and no
+    // pairing to redo — the token in the URL is the whole credential.
+    if (relayCfg && relayToken) { es = relaySource(); wireStream(); return; }
+    // Present the stored session so the server re-attaches this phone to it. An id
+    // it did not mint is ignored and a fresh one comes back, so a stale value is
+    // harmless rather than an error path.
+    var q = "/events?code=" + encodeURIComponent(code) + (sid ? "&sid=" + encodeURIComponent(sid) : "");
+    es = new EventSource(q);
+    wireStream();
+    es.onopen = function(){ $("dot").classList.add("on"); setConn("remote.connected"); };
+    // A real network drop reconnects on its own (EventSource does it natively).
+    //
+    // But CLOSED means EventSource has given up for good — which is what a rotated join code
+    // produces (403 on /events). Sitting under the reconnecting label forever would be a lie,
+    // so confirm with one cheap /pair probe and, if the code really is dead, send the user
+    // back to the gate instead of leaving them stranded. A genuine network drop leaves
+    // readyState CONNECTING and still auto-reconnects, untouched. (AUDIT-V19)
+    es.onerror = function(){
+      $("dot").classList.remove("on");
+      setConn("remote.reconnecting");
+      if (es && es.readyState === 2 /* CLOSED */) {
+        fetch("/pair?code=" + encodeURIComponent(code)).then(function(r){
+          if (!r.ok) backToPair("remote.wrongCode");
+        }).catch(function(){ /* offline: leave the reconnecting label up and let it recover */ });
+      }
+    };
+  }
+
+  /**
+   * Attach the stream handlers.
+   *
+   * Extracted so the relay reuses them verbatim rather than growing a parallel
+   * set. Two copies of the rendering path is how a phone starts behaving
+   * differently depending on how it joined, which is the hardest kind of bug to
+   * be told about second-hand from a pub.
+   */
+  function wireStream(){
+    // Sent first, before any state. Persist it immediately: a phone that drops
+    // before storing its id comes back as a stranger and strands its seat.
+    es.addEventListener("session", function(ev){
+      try {
+        var s = JSON.parse(ev.data);
+        if (s && s.sid) { sid = s.sid; localStorage.setItem("darts_remote_sid", s.sid); }
+        // The server is the authority on which seat we hold — after a reconnect it
+        // tells us, so the phone does not have to remember (or guess) for itself.
+        if (s) mySeat = s.seat || null;
+        // Admin is the SERVER's answer, never this page's opinion — it is
+        // re-sent on reconnect and revoked when the venue changes its PIN.
+        if (s) isAdmin = !!s.admin;
+        renderAdmin();
+      } catch(e){}
+    });
+    // Re-render on arrival, not just on the next state push: a seat taken by
+    // another phone has to grey out NOW, or this phone shows it as free and only
+    // finds out by being refused.
+    es.addEventListener("seats", function(ev){ try { seats = JSON.parse(ev.data); if (state) renderSeats(state); } catch(e){} });
+    es.addEventListener("state", function(ev){ try { state = JSON.parse(ev.data); renderAll(); } catch(e){} });
+    // Only the relay sends this: over HTTP a refusal is the response status and
+    // post() reacts to it there. Without it a relayed "not your turn" would vanish
+    // and the player would tap again, harder, believing the app had missed it.
+    // Only the relay sends this, and for the same reason as cmderr: the command was
+    // queued rather than answered, so the outcome comes back later on this phone's
+    // own channel. Over the LAN it is the POST's own response and playerSignIn reads
+    // it there.
+    es.addEventListener("signin", function(ev){
+      try {
+        var j = JSON.parse(ev.data);
+        if (j && j.ok) {
+          mySeat = j.seat || mySeat;
+          isAdmin = !!j.admin;
+          plMsg("remote.player.ok");
+          cardBox(!!myToken);   // the relay signs in with a cloud token too
+          renderAdmin();
+          if (state) renderAll();
+          return;
+        }
+        // 503 is "could not reach the account service", which is a different thing to
+        // say than "wrong" — one asks them to wait, the other to check what they typed.
+        plMsg(j && j.status === 503 ? "remote.player.offline" : "remote.player.wrong");
+      } catch(e){}
+    });
+    es.addEventListener("cmderr", function(ev){
+      try {
+        var e = JSON.parse(ev.data);
+        if (e && e.reason === "not your turn") { seatMsg("remote.notYourTurn"); showTab("player"); }
+      } catch(e){}
+    });
+  }
+  // #231: the phone is the scoreboard while you play, so letting it dim and lock after
+  // 30 seconds means unlocking it between every visit. Hold a screen wake lock while the
+  // remote is open. The browser drops the lock whenever the page is hidden, so it is
+  // re-taken on the way back. Best-effort by design: Wake Lock needs iOS 16.4+, and on
+  // anything older this simply does nothing rather than erroring.
+  var wakeLock = null;
+  function keepAwake(){
+    try {
+      if (!navigator.wakeLock || document.hidden || wakeLock) return;
+      navigator.wakeLock.request("screen").then(function(l){
+        wakeLock = l;
+        l.addEventListener("release", function(){ wakeLock = null; });
+      }).catch(function(){ wakeLock = null; }); // denied (low battery / unsupported) — not an error worth showing
+    } catch (e) {}
+  }
+  document.addEventListener("visibilitychange", function(){ if (!document.hidden) keepAwake(); });
+
+  function startApp(){ $("pair").classList.add("hidden"); $("app").classList.remove("hidden"); applyAccess(); connect(); keepAwake(); }
+
+  // ---- pairing ----
+  function tryPair(c){
+    $("pairErr").textContent = "";
+    fetch("/pair?code=" + encodeURIComponent(c)).then(function(r){
+      if (r.ok){ code = c; localStorage.setItem("darts_remote_code", c); startApp(); }
+      else { $("pairErr").textContent = T("remote.wrongCode"); }
+    }).catch(function(){ $("pairErr").textContent = T("remote.noReach"); });
+  }
+  $("pairBtn").addEventListener("click", function(){ tryPair(($("code").value||"").trim()); });
+  $("code").addEventListener("keydown", function(e){ if (e.key==="Enter") tryPair(($("code").value||"").trim()); });
+  // Auto-pair on load. Try the stored code first (the last that paired); if the host has since
+  // rotated it, fall back to a DIFFERENT url ?c= before giving up, so a freshly-scanned QR still
+  // auto-pairs. Persist ONLY a code that pairs, so a stale home-screen shortcut can never
+  // overwrite a good stored code. (#236 + AUDIT-V17)
+  function pairWith(c, onFail){
+    fetch("/pair?code=" + encodeURIComponent(c)).then(function(r){
+      if (r.ok){ code = c; localStorage.setItem("darts_remote_code", c); startApp(); }
+      else onFail();
+    }).catch(function(){ /* offline: leave the pair screen up; the user can retry */ });
+  }
+  function forgetStored(){ localStorage.removeItem("darts_remote_code"); code = ""; }
+  // The relay needs no pairing round trip: the 160-bit token from the QR IS the
+  // credential, and there is no board to ask on this network anyway. Checked
+  // first so a phone that has both a token and a stale 6-digit code does not sit
+  // on a /pair request that can never be answered.
+  if (relayCfg && relayToken) {
+    try { localStorage.setItem("darts_relay_token", relayToken); } catch(e){}
+    startApp();
+  } else if (stored) {
+    pairWith(stored, function(){
+      if (qcode && qcode !== stored) pairWith(qcode, forgetStored); else forgetStored();
+    });
+  } else if (qcode) {
+    pairWith(qcode, function(){ code = ""; });
+  }
+})();
+</script>
+</body>
+</html>

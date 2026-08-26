@@ -1,0 +1,11 @@
+{
+  "name": "Darts Remote",
+  "short_name": "Darts",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b0d10",
+  "theme_color": "#0b0d10",
+  "start_url": "./",
+  "icons": [],
+  "scope": "./"
+}
