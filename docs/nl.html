@@ -1674,7 +1674,11 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
     // The seat picker is not a choice until you have signed in — the gate refuses a seat
     // from a phone that has not said who it is, so offering it first is a dead end with a
     // misleading answer at the bottom of it. Sign in, THEN say which player you are.
-    show("seat-box", signedIn || !!mySeat || !!isAdmin);
+    // Shown to EVERY paired phone now, signed in or not. Taking a seat is one of the
+    // ways to say who you are, so it cannot be gated behind having already done so —
+    // that was a locked door with the key inside, and it is why 33 of 34 real players
+    // could do nothing at all here.
+    show("seat-box", true);
     var statsBtn = $("tab-stats");
     if (statsBtn) statsBtn.classList.toggle("hidden", !identified);
     // Settings is the venue's, not the player's: admin only, exactly like the controls
@@ -1796,7 +1800,13 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
   function followBoard(sc){
     // Nothing to follow to until they have said who they are — and a board screen change
     // must never wipe a half-typed sign-in.
-    if (!signedIn && !isAdmin) return false;
+    //
+    // A SEAT COUNTS. This tested only signedIn and isAdmin, which was the whole identity
+    // test before taking a seat became one of the ways to answer it. A seated phone with no
+    // account — which is 33 of the 34 real profiles on this board — was therefore left
+    // sitting on whatever tab it happened to be on while the big screen moved without
+    // it. Same condition as canPlay, and as the gate on the board side.
+    if (!signedIn && !mySeat && !isAdmin) return false;
     var view = FOLLOW[sc];
     if (!view || !maySee(view)) {
       $("follow-where").textContent = HERE[sc] ? T(HERE[sc]) : "";
