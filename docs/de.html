@@ -382,7 +382,9 @@ const SHARED_EVENTS = new Set(["state", "seats", "ping", "notice"]);
 // on mobile data; the tests could not see it because each side was checked against its
 // own idea of the protocol. test/relay-event-names.test.js now checks them against
 // EACH OTHER.
-const PRIVATE_EVENTS = new Set(["session", "cmderr", "signin"]);
+// seated: the answer to a seat claim. Named here or the phone drops it on the floor —
+// which is exactly what happened to "signin" when it was published but not allowed.
+const PRIVATE_EVENTS = new Set(["session", "cmderr", "signin", "seated"]);
 
 /**
  * A fresh session id: 128 bits of CSPRNG, hex.
@@ -1552,19 +1554,23 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
   // starts — whoever is in the lineup. Bots are excluded: nobody is holding a
   // phone for them.
   function seatOptions(s){
-    if (s.game && s.game.players && s.game.players.length) return s.game.players.map(function(p){ return p.name; });
+    // Bots are excluded from BOTH branches. This one never filtered them — the seat
+    // list during a live game offered "Beginner Bot" as somebody you could be, and
+    // the guard that was supposed to prevent it only ever looked at the lineup branch
+    // below. The snapshot now carries p.bot so this branch can tell.
+    if (s.game && s.game.players && s.game.players.length) return s.game.players.filter(function(p){ return !p.bot; }).map(function(p){ return p.name; });
     return (s.lineup || []).filter(Boolean).filter(function(sl){ return !sl.bot; }).map(function(sl){ return sl.name; });
   }
 
   // Claiming needs the RESPONSE (a seat can be refused), so it cannot use post(),
   // which is deliberately fire-and-forget.
   function claimSeat(name){
-    // Over the relay this posted to a RELATIVE /cmd, which on the exported page is
-    // the STATIC HOST — it 404'd and the tap did nothing, with no explanation. And
-    // it could not have worked anyway: seat is LAN-only (onRelayCommand refuses
-    // it), because claiming a seat needs a stateful reply the relay has no path
-    // for yet. Say so rather than fail silently. (AUDIT-RELAY 2nd pass)
-    if (relayCfg && relayToken) { seatMsg("remote.seat.lanOnly"); return; }
+    // Over the relay this posted to a RELATIVE /cmd, which on the exported page is the
+    // STATIC HOST — it 404'd and the tap did nothing, with no explanation. It then said
+    // "seats need the pub's Wi-Fi" instead, which was honest at the time and is not any
+    // more: seat crosses the relay now, because taking one is how a player without an
+    // account says who they are, and refusing it there left the relay with no way in.
+    if (RELAY) { RELAY.send({ type: "seat", seat: name }); return; }
     var q = "/cmd?code=" + encodeURIComponent(code) + (sid ? "&sid=" + encodeURIComponent(sid) : "");
     fetch(q, { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify({ type:"seat", seat:name }) })
       .then(function(r){
@@ -2059,6 +2065,19 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
     // The relay's only way to say no. Nothing here may fall through in silence: a
     // refusal the player cannot see is a button that does nothing, and they press it
     // harder. Handled in the same order the board can send them.
+    // The relay's answer to a seat claim. The LAN reads it off the response instead;
+    // both end in the same place, which is the point of _seatCore.
+    es.addEventListener("seated", function(ev){
+      try {
+        var j = JSON.parse(ev.data);
+        mySeat = (j && j.seat) || null;
+        if (j && typeof j.admin === "boolean") isAdmin = j.admin;
+        seatMsg("");
+        applyAccess();
+        syncToBoard();
+        if (state) renderAll();
+      } catch(e){}
+    });
     es.addEventListener("cmderr", function(ev){
       try {
         var e = JSON.parse(ev.data);
@@ -2073,7 +2092,12 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
           return;
         }
         if (e.reason === "lan only") {
-          seatMsg(e.type === "seat" ? "remote.seat.lanOnly" : "remote.admin.lanOnly");
+          // Only the credential commands are lan-only now. A seat used to be, and its
+          // message read "Seats need the pub's Wi-Fi — you can still score from here",
+          // whose second half stopped being true the moment an unidentified phone was
+          // refused every command. A seat crosses the relay now, so neither half of that
+          // sentence applies and it is no longer reachable.
+          seatMsg("remote.admin.lanOnly");
           return;
         }
         if (e.reason === "sign in first") { seatMsg("remote.seat.signIn"); return; }
