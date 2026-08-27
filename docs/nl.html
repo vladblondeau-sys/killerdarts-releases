@@ -847,7 +847,7 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
 
     <nav id="tabs">
       <button data-tab="player"><span class="ic">👤</span><span data-t="remote.tab.player">Speler</span></button>
-      <button data-tab="game" class="on"><span class="ic">🎯</span><span data-t="remote.tab.game">Spel</span></button>
+      <button id="tab-game" data-tab="game" class="on"><span class="ic">🎯</span><span data-t="remote.tab.game">Spel</span></button>
       <button id="tab-stats" data-tab="stats"><span class="ic">📊</span><span data-t="remote.tab.stats">Stats</span></button>
       <button id="tab-settings" data-tab="settings"><span class="ic">⚙️</span><span data-t="remote.tab.settings">Instell.</span></button>
     </nav>
@@ -985,10 +985,33 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
     var q = "/cmd?code=" + encodeURIComponent(code) + (sid ? "&sid=" + encodeURIComponent(sid) : "");
     return fetch(q, { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(cmd), keepalive:true })
       .then(function(r){
-        if (r && r.status === 409) { seatMsg("remote.notYourTurn"); showTab("player"); return false; }
-        flash();
-        if (navigator.vibrate) { try { navigator.vibrate(12); } catch(e){} }
-        return true;
+        if (r && r.ok) {
+          flash();
+          if (navigator.vibrate) { try { navigator.vibrate(12); } catch(e){} }
+          return true;
+        }
+        // EVERY refusal, not only 409. The note above says a discarded dart must never
+        // look like one that scored — and then only the turn rule was handled, so a 403
+        // ("sign in first", "admin required") fell straight through to flash() and
+        // vibrate: the phone confirmed, the phone buzzed, and the board never moved.
+        // A phone that has not signed in is refused EVERY command, so that silent
+        // false confirmation was the state a new player met on their first tap.
+        return r.text().then(function(t){
+          var body = (t || "").trim();
+          if (r.status === 403) {
+            if (body.indexOf("admin") === 0) { seatMsg("remote.err.adminOnly"); return false; }
+            seatMsg("remote.seat.signIn"); showTab("player"); return false;
+          }
+          if (r.status === 409) {
+            // 409 is not only the turn rule. Telling someone "not your turn" when the
+            // board is not set up sends them looking for entirely the wrong thing.
+            if (body.indexOf("not your turn") === 0) { seatMsg("remote.notYourTurn"); showTab("player"); return false; }
+            if (body.indexOf("board not set up") === 0) { seatMsg("remote.err.notSetUp"); return false; }
+            if (body.indexOf("camera scoring off") === 0) { seatMsg("remote.err.camOff"); return false; }
+          }
+          seatMsg("remote.notSent");
+          return false;
+        }).catch(function(){ seatMsg("remote.notSent"); return false; });
       })
       .catch(function(){ flash(); return true; });   // offline: keep the old optimistic feel
   }
@@ -1657,11 +1680,29 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
     // security.
     var setBtn = $("tab-settings");
     if (setBtn) setBtn.classList.toggle("hidden", !isAdmin);
-    // Never strand someone on a view that has just been taken away from them.
+    // THE GAME TAB IS THE DARTPAD, and the dartpad is the one thing the server refuses
+    // outright from a phone that has not said who it is — every button on it 403s. It
+    // was shown anyway: a new player met a full, undimmed pad, tapped 20, and (before
+    // the fix in post()) got a flash and a buzz for a dart the board never saw.
+    //
+    // Gated on the SAME condition the server gates commands on — signed in, or the
+    // owner — and NOT on identified, which is seat-or-admin: a signed-in phone with no
+    // seat is the shared wall pad, and that must keep scoring for bots and for players
+    // without a phone. (No backticks in this comment: the whole page is one template
+    // literal, and a stray pair ends it.)
+    var canPlay = signedIn || !!mySeat || !!isAdmin;
+    var gameBtn = $("tab-game");
+    if (gameBtn) gameBtn.classList.toggle("hidden", !canPlay);
+    // Never strand someone on a view that has just been taken away from them. The
+    // fallback is the game tab, EXCEPT when that is the one being taken away — then
+    // there is exactly one place left to go, and it is the one with the sign-in form.
+    var home = canPlay ? "game" : "player";
     var stats = $("view-stats");
-    if (!identified && stats && stats.classList.contains("on")) showTab("game");
+    if (!identified && stats && stats.classList.contains("on")) showTab(home);
     var setView = $("view-settings");
-    if (!isAdmin && setView && setView.classList.contains("on")) showTab("game");
+    if (!isAdmin && setView && setView.classList.contains("on")) showTab(home);
+    var gameView = $("view-game");
+    if (!canPlay && gameView && gameView.classList.contains("on")) showTab("player");
   }
 
   function showTab(name){ document.querySelectorAll(".view").forEach(function(v){ v.classList.toggle("on", v.id==="view-"+name); }); tabBtns.forEach(function(b){ b.classList.toggle("on", b.dataset.tab===name); }); }
