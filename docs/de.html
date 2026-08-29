@@ -981,7 +981,7 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
   var isGuest = false;    // identified, but to a name rather than an account
   // What this page was built from. Compared against the board's on every session
   // event — see the reload below.
-  var PAGE_STAMP = "835a2391";
+  var PAGE_STAMP = "3eb17334";
 
   var setupDone = false;  // just claimed this board: show the confirmation until dismissed
   // Only the SETUP QR carries this. Without it the board cannot be claimed, which
@@ -1621,6 +1621,14 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
 
   function renderPointer(s){
     var items = (s && s.pointer) || [];
+    // The venue's own controls are the admin's. Filtered here so a player is not shown
+    // a wall of settings chips that answer every tap with "admin required" — the whole
+    // Settings screen is admin-marked, so for most people it is the difference between
+    // a screen of dead buttons and a screen that says the board is doing something else.
+    //
+    // Manners, not the gate. The server refuses the tap; this only stops the phone
+    // offering it. Anyone can edit this page — it is served over the internet.
+    if (!isAdmin) items = items.filter(function(it){ return !it.admin; });
     // The hint says look up. That is right only when there is nothing here to tap.
     var sub = $("follow-sub");
     if (sub) sub.classList.toggle("hidden", items.length > 0);
