@@ -117,6 +117,11 @@
   .chips { display:flex; flex-wrap:wrap; gap:6px; padding:0 14px; }
   .chipb { padding:9px 12px; border-radius:10px; background:var(--panel2); border:1px solid var(--line); font-size:13px; font-weight:600; }
   .chipb.on { background:var(--accent); color:#04121b; border-color:var(--accent); }
+  /* Pointer list. A short label is a chip; one carrying a second line takes the whole
+     row, because a recording reads as 'name, then when' and not as a wrapped tile. */
+  .chipb.wide { flex:1 0 100%; text-align:left; }
+  .psec { flex:1 0 100%; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.14em; color:var(--dim); padding:10px 2px 2px; }
+  .psub { display:block; font-weight:500; font-size:12px; color:var(--dim); margin-top:3px; }
 
   /* Lineup */
   .lu { padding:6px 14px 0; display:flex; flex-direction:column; gap:6px; }
@@ -140,6 +145,7 @@
   .addrow input { flex:1; padding:12px; border-radius:12px; background:var(--panel2); border:1px solid var(--line); color:var(--txt); font-size:15px; }
   .addrow button { padding:0 18px; border-radius:12px; background:var(--accent); color:#04121b; font-size:15px; font-weight:800; }
   .bigbtn { margin:14px; padding:18px; border-radius:14px; background:var(--green); color:#03130a; font-size:18px; font-weight:800; }
+  .bigbtn.alt { background:var(--panel2); color:var(--txt); border:1px solid var(--line); margin-bottom:8px; }
   .bigbtn:disabled { background:var(--panel2); color:var(--dim); }
 
   /* Settings */
@@ -623,7 +629,7 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
 
   <section id="pair">
     <h1 data-t="remote.title">Darts Remote</h1>
-    <p><span data-t="remote.pairHint">Enter the 6-digit code shown on the app</span><br><span data-t="remote.pairWhere">(Settings › Phone remote)</span></p>
+    <p><span data-t="remote.pairHint">Enter the 6-digit code shown on the app</span><br><span data-t="remote.pairWhere">(shown on the board)</span></p>
     <input id="code" inputmode="numeric" maxlength="6" pattern="[0-9]*" placeholder="000000" autocomplete="off">
     <div id="pairErr"></div>
     <button id="pairBtn" data-t="remote.connect">Connect</button>
@@ -640,6 +646,11 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
           <div id="darts"></div>
           <div id="others"></div>
         </div>
+        <!-- ABOVE the pad, because what lands here is the game waiting on an answer:
+             a leg won, a pause, rules to accept. The other slots are inside blocks that
+             are hidden during play, so without this one the question has nowhere to go
+             at exactly the moment the game cannot continue without it. -->
+        <div class="chips point-list"></div>
         <div id="pad">
           <div id="mult">
             <button data-m="1" class="sel" data-t="remote.single">SINGLE</button>
@@ -676,16 +687,22 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
           <input id="pl-name" data-tph="remote.addByName" placeholder="Add player by name" autocomplete="off">
           <button id="pl-add" data-t="remote.add">Add</button>
         </div>
-        <!-- GATED: the venue roster. Every saved player at this pub, by name —
-             which is other people's data on a phone the venue does not own, so it
-             waits until you have said which player you are. Adding by NAME above
-             stays open, so a game can still be set up by someone anonymous. -->
-        <div id="saved-players" class="hidden">
-        <div class="sec" data-t="remote.addSaved">Add a saved player</div>
-        <div class="chips" id="pl-profiles"></div>
-        </div>
+        <!-- The venue roster used to be here, behind a gate: every saved player at
+             this pub, by name, once you had said which player you were. Gated is not
+             the same as private — taking a seat is easy, and the reward was thirty-odd
+             other people's names on a stranger's phone. It is gone, and the roster is
+             not sent to a phone at all now. Add by NAME above instead: a name that
+             matches an existing player attaches to them, history and all. -->
         <div class="sec" data-t="remote.addBot">Add a bot</div>
         <div class="chips" id="pl-bots"></div>
+        <!-- The board's current screen may offer things to point at — a mode's settings,
+             say. The phone follows the board to THIS tab while it is setting up, so the
+             list has to be here too, or it renders into a view nobody is looking at. -->
+        <div class="chips point-list"></div>
+        <!-- The way in to the mode's settings. Without it the only route to the
+             set-up screen was the board's own button, so every game a phone started
+             ran on whatever settings were last chosen at the board. -->
+        <button class="bigbtn alt" id="pl-setup">Set up game</button>
         <button class="bigbtn" id="pl-start">Start game</button>
         </div>
 
@@ -722,10 +739,35 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
         </div>
 
         <div id="player-body">
+
+        <!-- THE FIRST THING A PHONE SEES.
+             Three doors and nothing else: sign in, make an account, or play as a
+             guest. The forms live behind the first two rather than in front of
+             them — a page that opens on an email field asks a question before it
+             has said what it is. -->
+        <div id="welcome">
+          <div class="sec" data-t="remote.welcome.title">Welcome to Darts</div>
+          <div class="hint" data-t="remote.welcome.sub">Sign in and your stats follow you to any board. Or play as a guest — nothing is kept.</div>
+          <button class="bigbtn" id="wc-signin" data-t="remote.player.go">Sign in</button>
+          <button class="bigbtn alt" id="wc-register" data-t="remote.player.register">Create account</button>
+          <button class="bigbtn alt" id="wc-guest" data-t="remote.welcome.guest">Play as a guest</button>
+        </div>
+
+        <!-- A guest plays under a name they choose. It is NOT a list of the people
+             who drink here: naming yourself is not the same as claiming to be
+             somebody the board already knows. -->
+        <div id="guest-box" class="hidden">
+          <div class="sec" data-t="remote.guest.name">What shall we call you?</div>
+          <input id="gu-name" maxlength="40" autocomplete="off" data-tph="remote.guest.name" placeholder="What shall we call you?">
+          <div id="gu-msg"></div>
+          <button class="bigbtn" id="gu-go" data-t="remote.guest.go">Start playing</button>
+          <button class="bigbtn alt" id="gu-back" data-t="remote.welcome.back">Back</button>
+        </div>
+
         <!-- Signing in is how you get into a line-up now. Picking a name off a list
              was fine while a profile was a local scribble; it is not once that name
              carries a portable record that follows the person to every other board. -->
-        <div id="player-login">
+        <div id="player-login" class="hidden">
           <div class="sec" data-t="remote.player.title">Sign in to play</div>
           <div class="hint" data-t="remote.player.sub">New here? Create an account — it takes a moment and your stats then follow you to any board.</div>
           <!-- "Your email", not "Owner email". One form serves every player now; the
@@ -755,11 +797,9 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
           <!-- readonly, not disabled: it must still be selectable to copy. -->
           <input id="card-token" class="hidden" readonly autocomplete="off" spellcheck="false">
         </div>
-        <div id="seat-box" class="hidden">
-        <div class="sec" data-t="remote.seat.title">Who are you?</div>
-        <div class="hint" data-t="remote.seat.sub">Pick your name so this phone throws for you. One phone per player.</div>
-        <div class="chips" id="seat-list"></div>
-        </div>
+        <!-- The picker used to be a list of every player in the line-up, claimable
+             on nothing but the join code. Signing in above is what says who you are;
+             the board assigns the seat from the address the cloud returns. -->
         <!-- There were TWO sign-in forms here, taking the same two fields on the same
              screen: one for players, one for the venue owner. People used the wrong one,
              which is what two identical forms deserve. A person is not a role — you sign
@@ -784,6 +824,26 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
       <!-- SUGGEST — its own tab, rather than a box at the bottom of PLAYER.
            Moved whole: the #262 note on the file input below is the kind of thing that
            gets lost when markup is re-created instead of carried across. -->
+      <!-- ADMIN, and only when the board is showing its Settings screen. Everything
+           else on that screen is pointable on the board itself; this is the exception,
+           because typing an address and a password needs a keyboard. -->
+      <section id="view-owner" class="view">
+        <!-- The owner account. Collapsed behind a toggle because it is used about once
+             in the life of a board, and an open password form under the volume slider
+             would be the most alarming thing on the page. (V25-8) -->
+        <div class="sec" data-t="remote.owner.title">Owner account</div>
+        <button class="bigbtn" id="ow-open" style="background:var(--panel2);color:var(--txt)" data-t="remote.owner.change">Change email or password</button>
+        <div id="ow-form" class="hidden">
+          <div class="hint" data-t="remote.owner.sub">Enter the current details to prove it is you, then whichever one you want to change. Everyone signed in as admin is signed out.</div>
+          <input id="ow-email" type="email" inputmode="email" maxlength="254" autocomplete="username" autocapitalize="off" spellcheck="false" data-tph="remote.owner.curEmail" placeholder="Current email">
+          <input id="ow-pass" type="password" maxlength="200" autocomplete="current-password" data-tph="remote.owner.curPass" placeholder="Current password">
+          <input id="ow-new-email" type="email" inputmode="email" maxlength="254" autocomplete="email" autocapitalize="off" spellcheck="false" data-tph="remote.owner.newEmail" placeholder="New email (optional)">
+          <input id="ow-new-pass" type="password" maxlength="200" autocomplete="new-password" data-tph="remote.owner.newPass" placeholder="New password (optional)">
+          <div id="ow-msg"></div>
+          <button class="bigbtn" id="ow-go" data-t="remote.owner.save">Save</button>
+        </div>
+      </section>
+
       <section id="view-suggest" class="view">
         <div class="sec" data-t="remote.sug.new">New suggestion</div>
         <textarea id="sugText" data-tph="remote.sug.placeholder" placeholder="Describe your idea… it's stamped with where you are in the app, and sent to the developer next time you press Send on the PC."></textarea>
@@ -808,30 +868,6 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
         <div class="hint" id="sug-count"></div>
       </section>
 
-      <section id="view-settings" class="view">
-        <div id="admin-nav" class="hidden">
-        <div class="sec" data-t="remote.goTo">Go to</div>
-        <div class="menu-list" id="menu-list"></div>
-        </div>
-        <div id="admin-settings" class="hidden">
-        <div class="sec" data-t="remote.tab.settings">Settings</div>
-        <div id="set-body"></div>
-
-        <!-- The owner account. Collapsed behind a toggle because it is used about once
-             in the life of a board, and an open password form under the volume slider
-             would be the most alarming thing on the page. (V25-8) -->
-        <div class="sec" data-t="remote.owner.title">Owner account</div>
-        <button class="bigbtn" id="ow-open" style="background:var(--panel2);color:var(--txt)" data-t="remote.owner.change">Change email or password</button>
-        <div id="ow-form" class="hidden">
-          <div class="hint" data-t="remote.owner.sub">Enter the current details to prove it is you, then whichever one you want to change. Everyone signed in as admin is signed out.</div>
-          <input id="ow-email" type="email" inputmode="email" maxlength="254" autocomplete="username" autocapitalize="off" spellcheck="false" data-tph="remote.owner.curEmail" placeholder="Current email">
-          <input id="ow-pass" type="password" maxlength="200" autocomplete="current-password" data-tph="remote.owner.curPass" placeholder="Current password">
-          <input id="ow-new-email" type="email" inputmode="email" maxlength="254" autocomplete="email" autocapitalize="off" spellcheck="false" data-tph="remote.owner.newEmail" placeholder="New email (optional)">
-          <input id="ow-new-pass" type="password" maxlength="200" autocomplete="new-password" data-tph="remote.owner.newPass" placeholder="New password (optional)">
-          <div id="ow-msg"></div>
-          <button class="bigbtn" id="ow-go" data-t="remote.owner.save">Save</button>
-        </div>
-      </section>
 
       <!-- Where the phone lands when the board is somewhere it has no screen for —
            Party Night, Leagues, Recordings. Not an error and not a gap: those live on the
@@ -839,24 +875,23 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
       <section id="view-board" class="view">
         <div class="sec" data-t="remote.follow.title">On the board</div>
         <div id="follow-where" class="big"></div>
-        <div class="hint" data-t="remote.follow.sub">This one lives on the big screen — look up. Your phone comes back when the board moves on.</div>
+        <div class="hint" id="follow-sub" data-t="remote.follow.sub">This one lives on the big screen — look up. Your phone comes back when the board moves on.</div>
+        <!-- What this screen lets you point at. Empty on a screen that offers nothing,
+             which is when the hint above is the whole message. -->
+        <div class="chips point-list"></div>
+        <!-- Pointing at one of the board's destinations is still pointing. This sends
+             nav commands rather than drawing a screen of its own, which is why it
+             belongs to the mouse and not to the deleted tab bar. -->
+        <div class="sec" data-t="remote.goTo">Go to</div>
+        <div class="menu-list" id="menu-list"></div>
+        <!-- The board's own app, on this phone. Hidden until this phone has said who
+             it is, because it carries the venue's whole records — the server refuses
+             it as well, this only stops offering a door that would not open. -->
+        <button class="bigbtn alt hidden" id="open-app" data-t="remote.openFullApp">Open the full board</button>
       </section>
 
-      <section id="view-stats" class="view">
-        <div class="sec" data-t="remote.stats.standings">This game</div>
-        <div id="st-standings"></div>
-        <div class="sec" data-t="remote.stats.career">At this board</div>
-        <div id="st-career"></div>
-      </section>
     </div>
 
-    <nav id="tabs">
-      <button data-tab="player"><span class="ic">👤</span><span data-t="remote.tab.player">Player</span></button>
-      <button id="tab-game" data-tab="game" class="on"><span class="ic">🎯</span><span data-t="remote.tab.game">Game</span></button>
-      <button id="tab-stats" data-tab="stats"><span class="ic">📊</span><span data-t="remote.tab.stats">Stats</span></button>
-      <button id="tab-suggest" data-tab="suggest"><span class="ic">💡</span><span data-t="remote.tab.suggest">Idea</span></button>
-      <button id="tab-settings" data-tab="settings"><span class="ic">⚙️</span><span data-t="remote.tab.settings">Settings</span></button>
-    </nav>
   </main>
 
 <script>
@@ -867,7 +902,7 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
   // lookup order asked-for language → English → the key itself, {name} placeholder
   // interpolation, and Intl.PluralRules for countable keys — not n===1, which gets
   // French wrong (it renders 0 as singular).
-  var I18N = {"remote.title":{"en":"Darts Remote","fr":"Télécommande Darts","de":"Darts-Fernbedienung","es":"Mando Darts","nl":"Darts-afstandsbediening"},"remote.pairHint":{"en":"Enter the 6-digit code shown on the app","fr":"Saisis le code à 6 chiffres affiché dans l'app","de":"Gib den 6-stelligen Code aus der App ein","es":"Introduce el código de 6 dígitos que muestra la app","nl":"Voer de 6-cijferige code uit de app in"},"remote.pairWhere":{"en":"(Settings › Phone remote)","fr":"(Réglages › Télécommande)","de":"(Einstellungen › Handy-Fernbedienung)","es":"(Ajustes › Mando móvil)","nl":"(Instellingen › Telefoonbediening)"},"remote.connect":{"en":"Connect","fr":"Connexion","de":"Verbinden","es":"Conectar","nl":"Verbinden"},"remote.wrongCode":{"en":"Wrong code — check the app.","fr":"Code incorrect — vérifie dans l'app.","de":"Falscher Code — schau in der App nach.","es":"Código incorrecto — compruébalo en la app.","nl":"Verkeerde code — kijk in de app."},"remote.noReach":{"en":"Can't reach the app.","fr":"App injoignable.","de":"App nicht erreichbar.","es":"No se llega a la app.","nl":"App niet bereikbaar."},"remote.connecting":{"en":"Connecting…","fr":"Connexion…","de":"Verbinden…","es":"Conectando…","nl":"Verbinden…"},"remote.connected":{"en":"Connected","fr":"Connecté","de":"Verbunden","es":"Conectado","nl":"Verbonden"},"remote.reconnecting":{"en":"Reconnecting…","fr":"Reconnexion…","de":"Neu verbinden…","es":"Reconectando…","nl":"Opnieuw verbinden…"},"remote.takenOver":{"en":"Another phone took control","fr":"Un autre téléphone a pris le contrôle","de":"Ein anderes Telefon hat übernommen","es":"Otro teléfono tomó el control","nl":"Een andere telefoon nam het over"},"remote.takeControl":{"en":"Take control","fr":"Prendre le contrôle","de":"Übernehmen","es":"Tomar el control","nl":"Overnemen"},"remote.single":{"en":"SINGLE","fr":"SIMPLE","de":"SINGLE","es":"SIMPLE","nl":"ENKEL"},"remote.double":{"en":"DOUBLE","fr":"DOUBLE","de":"DOPPEL","es":"DOBLE","nl":"DUBBEL"},"remote.treble":{"en":"TREBLE","fr":"TRIPLE","de":"TRIPLE","es":"TRIPLE","nl":"TRIPLE"},"remote.bull":{"en":"BULL","fr":"BULL","de":"BULL","es":"BULL","nl":"BULL"},"remote.miss":{"en":"MISS","fr":"MANQUÉ","de":"DANEBEN","es":"FALLO","nl":"MIS"},"remote.undo":{"en":"UNDO","fr":"ANNULER","de":"ZURÜCK","es":"DESHACER","nl":"ONGEDAAN"},"remote.board.title":{"en":"Camera board","fr":"Cible caméra","de":"Kamera-Board","es":"Diana con cámara","nl":"Camerabord"},"remote.board.calibrate":{"en":"Calibrate","fr":"Calibrer","de":"Kalibrieren","es":"Calibrar","nl":"Kalibreren"},"remote.board.reset":{"en":"Reset","fr":"Réinitialiser","de":"Zurücksetzen","es":"Reiniciar","nl":"Resetten"},"remote.board.start":{"en":"Start","fr":"Démarrer","de":"Start","es":"Iniciar","nl":"Starten"},"remote.board.stop":{"en":"Stop","fr":"Arrêter","de":"Stopp","es":"Parar","nl":"Stoppen"},"remote.noGame":{"en":"No game in progress","fr":"Aucune partie en cours","de":"Kein Spiel läuft","es":"Ninguna partida en curso","nl":"Geen partij bezig"},"remote.wins":{"en":"{name} wins","fr":"{name} gagne","de":"{name} gewinnt","es":"Gana {name}","nl":"{name} wint"},"remote.goTo":{"en":"Go to","fr":"Aller à","de":"Gehe zu","es":"Ir a","nl":"Ga naar"},"remote.nav.home":{"en":"Home","fr":"Accueil","de":"Start","es":"Inicio","nl":"Start"},"remote.nav.stats":{"en":"Players & Stats","fr":"Joueurs & stats","de":"Spieler & Statistiken","es":"Jugadores y estadísticas","nl":"Spelers & statistieken"},"remote.nav.party":{"en":"Party Night","fr":"Soirée","de":"Party-Abend","es":"Noche de Fiesta","nl":"Feestavond"},"remote.nav.leagues":{"en":"Leagues","fr":"Ligues","de":"Ligen","es":"Ligas","nl":"Competities"},"remote.nav.recordings":{"en":"Recordings","fr":"Enregistrements","de":"Aufnahmen","es":"Grabaciones","nl":"Opnames"},"remote.nav.settings":{"en":"Settings","fr":"Réglages","de":"Einstellungen","es":"Ajustes","nl":"Instellingen"},"remote.game":{"en":"Game","fr":"Partie","de":"Spiel","es":"Partida","nl":"Partij"},"remote.lineup":{"en":"Line-up","fr":"Composition","de":"Aufstellung","es":"Alineación","nl":"Opstelling"},"remote.emptySlot":{"en":"Empty slot","fr":"Place libre","de":"Freier Platz","es":"Hueco libre","nl":"Vrije plek"},"remote.addByName":{"en":"Add player by name","fr":"Ajouter un joueur par son nom","de":"Spieler per Name hinzufügen","es":"Añadir jugador por nombre","nl":"Speler op naam toevoegen"},"remote.add":{"en":"Add","fr":"Ajouter","de":"Hinzufügen","es":"Añadir","nl":"Toevoegen"},"remote.addSaved":{"en":"Add a saved player","fr":"Ajouter un joueur enregistré","de":"Gespeicherten Spieler hinzufügen","es":"Añadir un jugador guardado","nl":"Opgeslagen speler toevoegen"},"remote.noProfiles":{"en":"No saved players yet — add one by name above.","fr":"Aucun joueur enregistré — ajoutes-en un par son nom ci-dessus.","de":"Noch keine gespeicherten Spieler — füge oben einen per Name hinzu.","es":"Aún no hay jugadores guardados — añade uno por nombre arriba.","nl":"Nog geen opgeslagen spelers — voeg er hierboven een op naam toe."},"remote.addBot":{"en":"Add a bot","fr":"Ajouter un bot","de":"Bot hinzufügen","es":"Añadir un bot","nl":"Bot toevoegen"},"remote.bot.beginner":{"en":"Beginner bot","fr":"Bot débutant","de":"Anfänger-Bot","es":"Bot principiante","nl":"Beginnersbot"},"remote.bot.medium":{"en":"Medium bot","fr":"Bot moyen","de":"Mittel-Bot","es":"Bot medio","nl":"Gemiddelde bot"},"remote.bot.pro":{"en":"Pro bot","fr":"Bot pro","de":"Profi-Bot","es":"Bot pro","nl":"Probot"},"remote.startGame":{"en":"Start game","fr":"Lancer la partie","de":"Spiel starten","es":"Empezar partida","nl":"Partij starten"},"remote.needPlayers":{"en":"Add at least 2 players","fr":"Ajoute au moins 2 joueurs","de":"Mindestens 2 Spieler hinzufügen","es":"Añade al menos 2 jugadores","nl":"Voeg minstens 2 spelers toe"},"remote.set.soundCaller":{"en":"Sound & caller","fr":"Son & annonceur","de":"Ton & Ansager","es":"Sonido y locutor","nl":"Geluid & omroeper"},"remote.set.sound":{"en":"Sound","fr":"Son","de":"Ton","es":"Sonido","nl":"Geluid"},"remote.set.caller":{"en":"Caller (spoken)","fr":"Annonceur (voix)","de":"Ansager (gesprochen)","es":"Locutor (voz)","nl":"Omroeper (gesproken)"},"remote.set.atmosphere":{"en":"3D atmosphere","fr":"Ambiance 3D","de":"3D-Atmosphäre","es":"Ambiente 3D","nl":"3D-sfeer"},"remote.set.atmosphereSound":{"en":"Atmosphere sound","fr":"Son d'ambiance","de":"Atmosphären-Ton","es":"Sonido de ambiente","nl":"Sfeergeluid"},"remote.set.masterVolume":{"en":"Master volume","fr":"Volume général","de":"Gesamtlautstärke","es":"Volumen general","nl":"Hoofdvolume"},"remote.set.boardScale":{"en":"Board scale","fr":"Échelle du tableau","de":"Board-Größe","es":"Escala del tablero","nl":"Bordschaal"},"remote.set.voiceGender":{"en":"Caller voice","fr":"Voix de l'annonceur","de":"Ansager-Stimme","es":"Voz del locutor","nl":"Stem omroeper"},"remote.set.female":{"en":"Female","fr":"Féminine","de":"Weiblich","es":"Femenina","nl":"Vrouw"},"remote.set.male":{"en":"Male","fr":"Masculine","de":"Männlich","es":"Masculina","nl":"Man"},"remote.set.walkOn":{"en":"Walk-on video","fr":"Vidéo d'entrée","de":"Walk-on-Video","es":"Vídeo de entrada","nl":"Opkomstvideo"},"remote.set.off":{"en":"Off","fr":"Désactivé","de":"Aus","es":"Desactivado","nl":"Uit"},"remote.set.firstLeg":{"en":"First leg","fr":"Premier leg","de":"Erstes Leg","es":"Primer leg","nl":"Eerste leg"},"remote.set.everyLeg":{"en":"Every leg","fr":"Chaque leg","de":"Jedes Leg","es":"Cada leg","nl":"Elke leg"},"remote.set.turnTimer":{"en":"Turn timer","fr":"Chrono de volée","de":"Aufnahme-Timer","es":"Cronómetro de turno","nl":"Beurtklok"},"remote.set.presentation":{"en":"Presentation","fr":"Présentation","de":"Präsentation","es":"Presentación","nl":"Presentatie"},"remote.set.theme":{"en":"Theme","fr":"Thème","de":"Design","es":"Tema","nl":"Thema"},"remote.sug.new":{"en":"New suggestion","fr":"Nouvelle suggestion","de":"Neuer Vorschlag","es":"Nueva sugerencia","nl":"Nieuwe suggestie"},"remote.sug.placeholder":{"en":"Describe your idea… it's stamped with where you are in the app, and sent to the developer next time you press Send on the PC.","fr":"Décris ton idée… elle est marquée de l'endroit où tu es dans l'app, et envoyée au développeur la prochaine fois que tu appuies sur Envoyer sur le PC.","de":"Beschreib deine Idee… sie wird mit deiner Stelle in der App versehen und beim nächsten Senden am PC an den Entwickler geschickt.","es":"Describe tu idea… se marca con el lugar donde estás en la app y se envía al desarrollador la próxima vez que pulses Enviar en el PC.","nl":"Beschrijf je idee… het wordt gemarkeerd met waar je bent in de app en naar de ontwikkelaar gestuurd zodra je op de pc op Verzenden drukt."},"remote.sug.save":{"en":"Save suggestion","fr":"Enregistrer la suggestion","de":"Vorschlag speichern","es":"Guardar sugerencia","nl":"Suggestie opslaan"},"remote.sug.saved":{"en":"Saved ✓ — send from the PC when ready.","fr":"Enregistré ✓ — envoie depuis le PC quand tu veux.","de":"Gespeichert ✓ — sende es vom PC, wenn du so weit bist.","es":"Guardada ✓ — envíala desde el PC cuando quieras.","nl":"Opgeslagen ✓ — verstuur vanaf de pc wanneer je wilt."},"remote.sug.savedSync":{"en":"Saved ✓ — it goes to the developer with this board’s next sync.","fr":"Enregistré ✓ — envoyé au développeur à la prochaine synchro de cette cible.","de":"Gespeichert ✓ — geht mit der nächsten Synchronisierung dieses Boards an den Entwickler.","es":"Guardado ✓: se envía al desarrollador con la próxima sincronización de esta diana.","nl":"Opgeslagen ✓ — gaat met de volgende synchronisatie van dit bord naar de ontwikkelaar."},"remote.sug.count_one":{"en":"{count} suggestion saved on this PC.","fr":"{count} suggestion enregistrée sur ce PC.","de":"{count} Vorschlag auf diesem PC gespeichert.","es":"{count} sugerencia guardada en este PC.","nl":"{count} suggestie opgeslagen op deze pc."},"remote.sug.count_other":{"en":"{count} suggestions saved on this PC.","fr":"{count} suggestions enregistrées sur ce PC.","de":"{count} Vorschläge auf diesem PC gespeichert.","es":"{count} sugerencias guardadas en este PC.","nl":"{count} suggesties opgeslagen op deze pc."},"remote.tab.settings":{"en":"Settings","fr":"Réglages","de":"Einstell.","es":"Ajustes","nl":"Instell."},"remote.here.home":{"en":"Home","fr":"Accueil","de":"Start","es":"Inicio","nl":"Start"},"remote.here.stats":{"en":"Players","fr":"Joueurs","de":"Spieler","es":"Jugadores","nl":"Spelers"},"remote.here.party":{"en":"Party Night","fr":"Soirée","de":"Party-Abend","es":"Noche de Fiesta","nl":"Feestavond"},"remote.here.settings":{"en":"Settings","fr":"Réglages","de":"Einstellungen","es":"Ajustes","nl":"Instellingen"},"remote.here.recordings":{"en":"Recordings","fr":"Enregistrements","de":"Aufnahmen","es":"Grabaciones","nl":"Opnames"},"remote.here.leagues":{"en":"Leagues","fr":"Ligues","de":"Ligen","es":"Ligas","nl":"Competities"},"remote.here.setup":{"en":"Set up","fr":"Préparation","de":"Einrichten","es":"Preparación","nl":"Opzetten"},"remote.here.play":{"en":"Playing","fr":"En jeu","de":"Im Spiel","es":"En juego","nl":"In het spel"},"remote.here.player":{"en":"Player","fr":"Joueur","de":"Spieler","es":"Jugador","nl":"Speler"},"remote.here.league":{"en":"League","fr":"Ligue","de":"Liga","es":"Liga","nl":"Competitie"},"remote.here.compare":{"en":"Compare","fr":"Comparer","de":"Vergleichen","es":"Comparar","nl":"Vergelijken"},"remote.here.test":{"en":"Test","fr":"Test","de":"Test","es":"Test","nl":"Test"},"remote.fullscreen":{"en":"Full screen","fr":"Plein écran","de":"Vollbild","es":"Pantalla completa","nl":"Volledig scherm"},"remote.fullscreenIos":{"en":"Full screen (add to Home Screen)","fr":"Plein écran (ajouter à l'écran d'accueil)","de":"Vollbild (zum Home-Bildschirm hinzufügen)","es":"Pantalla completa (añadir a pantalla de inicio)","nl":"Volledig scherm (zet op beginscherm)"},"remote.fullscreenIosHow":{"en":"iPhone has no full-screen button in the browser. To get one: tap Share, then \"Add to Home Screen\", and open the remote from that icon.","fr":"L'iPhone n'a pas de plein écran dans le navigateur. Pour l'obtenir : appuie sur Partager, puis « Sur l'écran d'accueil », et ouvre la télécommande depuis cette icône.","de":"Das iPhone hat im Browser keinen Vollbildmodus. So geht es: auf Teilen tippen, dann \"Zum Home-Bildschirm\", und die Fernbedienung über dieses Symbol öffnen.","es":"El iPhone no tiene pantalla completa en el navegador. Para conseguirla: toca Compartir, luego \"Añadir a pantalla de inicio\", y abre el mando desde ese icono.","nl":"De iPhone heeft geen volledig scherm in de browser. Zo wel: tik op Delen, dan \"Zet op beginscherm\", en open de afstandsbediening via dat icoon."},"remote.sug.photo":{"en":"Add a photo","fr":"Ajouter une photo","de":"Foto hinzufügen","es":"Añadir una foto","nl":"Foto toevoegen"},"remote.sug.photoClear":{"en":"Remove photo","fr":"Retirer la photo","de":"Foto entfernen","es":"Quitar la foto","nl":"Foto verwijderen"},"remote.sug.photoWorking":{"en":"Shrinking the photo…","fr":"Compression de la photo…","de":"Foto wird verkleinert…","es":"Reduciendo la foto…","nl":"Foto verkleinen…"},"remote.sug.photoTooBig":{"en":"That photo is too big to send. Try another one.","fr":"Cette photo est trop lourde à envoyer. Essaie-en une autre.","de":"Dieses Foto ist zu groß zum Senden. Versuch ein anderes.","es":"Esa foto es demasiado grande para enviarla. Prueba con otra.","nl":"Die foto is te groot om te versturen. Probeer een andere."},"remote.tab.player":{"en":"Player","fr":"Joueur","de":"Spieler","es":"Jugador","nl":"Speler"},"remote.tab.game":{"en":"Game","fr":"Partie","de":"Spiel","es":"Partida","nl":"Spel"},"remote.tab.stats":{"en":"Stats","fr":"Stats","de":"Statistik","es":"Estad.","nl":"Stats"},"remote.tab.suggest":{"en":"Idea","fr":"Idée","de":"Idee","es":"Idea","nl":"Idee"},"remote.seat.title":{"en":"Who are you?","fr":"Qui es-tu ?","de":"Wer bist du?","es":"¿Quién eres?","nl":"Wie ben jij?"},"remote.seat.sub":{"en":"Pick your name so this phone throws for you. One phone per player.","fr":"Choisis ton nom pour que ce téléphone lance pour toi. Un téléphone par joueur.","de":"Wähle deinen Namen, damit dieses Handy für dich wirft. Ein Handy pro Spieler.","es":"Elige tu nombre para que este móvil lance por ti. Un móvil por jugador.","nl":"Kies je naam zodat deze telefoon voor jou gooit. Eén telefoon per speler."},"remote.notYourTurn":{"en":"It's not your turn — that dart wasn't counted.","fr":"Ce n'est pas ton tour — cette fléchette n'a pas été comptée.","de":"Du bist nicht dran — dieser Dart wurde nicht gezählt.","es":"No es tu turno: ese dardo no se ha contado.","nl":"Je bent niet aan de beurt — die dart is niet geteld."},"remote.seat.release":{"en":"That is not me","fr":"Ce n'est pas moi","de":"Das bin ich nicht","es":"Ese no soy yo","nl":"Dat ben ik niet"},"remote.seat.taken":{"en":"Another phone is already that player.","fr":"Un autre téléphone est déjà ce joueur.","de":"Ein anderes Handy ist bereits dieser Spieler.","es":"Otro móvil ya es ese jugador.","nl":"Een andere telefoon is die speler al."},"remote.seat.failed":{"en":"Could not save that. Try again.","fr":"Enregistrement impossible. Réessaie.","de":"Konnte nicht gespeichert werden. Versuch es erneut.","es":"No se pudo guardar. Inténtalo de nuevo.","nl":"Opslaan mislukt. Probeer opnieuw."},"remote.seat.none":{"en":"Nobody is in the game yet — add players first.","fr":"Personne dans la partie pour l'instant — ajoute des joueurs.","de":"Noch niemand im Spiel — füge zuerst Spieler hinzu.","es":"Todavía no hay nadie en la partida: añade jugadores.","nl":"Nog niemand in het spel — voeg eerst spelers toe."},"remote.stats.standings":{"en":"This game","fr":"Cette partie","de":"Dieses Spiel","es":"Esta partida","nl":"Dit spel"},"remote.stats.career":{"en":"At this board","fr":"Sur cette cible","de":"An diesem Board","es":"En esta diana","nl":"Op dit bord"},"remote.stats.noGame":{"en":"No game running.","fr":"Aucune partie en cours.","de":"Kein Spiel läuft.","es":"No hay partida en curso.","nl":"Geen spel bezig."},"remote.stats.noCareer":{"en":"No players yet.","fr":"Aucun joueur pour l'instant.","de":"Noch keine Spieler.","es":"Todavía no hay jugadores.","nl":"Nog geen spelers."},"remote.stats.score":{"en":"left","fr":"restant","de":"übrig","es":"restan","nl":"resterend"},"remote.stats.avg":{"en":"avg","fr":"moy.","de":"Schnitt","es":"prom.","nl":"gem."},"remote.stats.games":{"en":"games","fr":"parties","de":"Spiele","es":"partidas","nl":"spellen"},"remote.stats.win":{"en":"won","fr":"gagné","de":"gewonnen","es":"ganado","nl":"gewonnen"},"remote.admin.title":{"en":"Venue admin","fr":"Admin du lieu","de":"Venue-Admin","es":"Admin del local","nl":"Locatiebeheer"},"remote.admin.sub":{"en":"Sign in with the board owner account to change settings, move the big screen or control the board.","fr":"Connecte-toi avec le compte propriétaire pour changer les réglages, déplacer l'écran ou piloter la cible.","de":"Melde dich mit dem Inhaber-Konto an, um Einstellungen zu ändern, den großen Bildschirm zu wechseln oder das Board zu steuern.","es":"Inicia sesión con la cuenta del propietario para cambiar ajustes, mover la pantalla grande o controlar la diana.","nl":"Log in met het eigenaarsaccount om instellingen te wijzigen, het grote scherm te wisselen of het bord te bedienen."},"remote.admin.ok":{"en":"Unlocked.","fr":"Déverrouillé.","de":"Entsperrt.","es":"Desbloqueado.","nl":"Ontgrendeld."},"remote.admin.wrong":{"en":"Wrong PIN.","fr":"Code incorrect.","de":"Falsche PIN.","es":"PIN incorrecto.","nl":"Verkeerde code."},"remote.admin.failed":{"en":"Could not reach the board.","fr":"Cible injoignable.","de":"Board nicht erreichbar.","es":"No se pudo contactar con la diana.","nl":"Bord niet bereikbaar."},"remote.setup.title":{"en":"Set up this board","fr":"Configurer cette cible","de":"Dieses Board einrichten","es":"Configurar esta diana","nl":"Dit bord instellen"},"remote.setup.sub":{"en":"This board is new. Create the owner account — you will sign in with it to change anything venue-wide.","fr":"Cette cible est neuve. Crée le compte propriétaire : tu t'y connecteras pour tout changement général.","de":"Dieses Board ist neu. Lege das Inhaber-Konto an — damit meldest du dich für alle venue-weiten Änderungen an.","es":"Esta diana es nueva. Crea la cuenta del propietario: con ella entrarás para cambiar cualquier cosa del local.","nl":"Dit bord is nieuw. Maak het eigenaarsaccount aan — daarmee log je in voor alles wat de hele locatie raakt."},"remote.setup.name":{"en":"Your name","fr":"Ton nom","de":"Dein Name","es":"Tu nombre","nl":"Jouw naam"},"remote.setup.go":{"en":"Set up the board","fr":"Configurer la cible","de":"Board einrichten","es":"Configurar la diana","nl":"Bord instellen"},"remote.setup.needName":{"en":"Enter your name.","fr":"Saisis ton nom.","de":"Gib deinen Namen ein.","es":"Escribe tu nombre.","nl":"Vul je naam in."},"remote.setup.mismatch":{"en":"The two PINs do not match.","fr":"Les deux codes ne correspondent pas.","de":"Die beiden PINs stimmen nicht überein.","es":"Los dos PIN no coinciden.","nl":"De twee codes komen niet overeen."},"remote.setup.taken":{"en":"Somebody just set this board up.","fr":"Quelqu'un vient de configurer cette cible.","de":"Jemand hat dieses Board gerade eingerichtet.","es":"Alguien acaba de configurar esta diana.","nl":"Iemand heeft dit bord net ingesteld."},"remote.setup.failed":{"en":"Setup failed. Try again.","fr":"Échec de la configuration. Réessaie.","de":"Einrichtung fehlgeschlagen. Versuch es erneut.","es":"La configuración falló. Inténtalo de nuevo.","nl":"Instellen mislukt. Probeer opnieuw."},"remote.admin.signIn":{"en":"Sign in","fr":"Se connecter","de":"Anmelden","es":"Entrar","nl":"Inloggen"},"remote.setup.email":{"en":"Your email","fr":"Ton e-mail","de":"Deine E-Mail","es":"Tu correo","nl":"Je e-mail"},"remote.setup.pass":{"en":"Choose a password","fr":"Choisis un mot de passe","de":"Passwort wählen","es":"Elige una contraseña","nl":"Kies een wachtwoord"},"remote.setup.pass2":{"en":"Repeat the password","fr":"Répète le mot de passe","de":"Passwort wiederholen","es":"Repite la contraseña","nl":"Herhaal het wachtwoord"},"remote.setup.badEmail":{"en":"That does not look like an email address.","fr":"Cela ne ressemble pas à une adresse e-mail.","de":"Das sieht nicht nach einer E-Mail-Adresse aus.","es":"Eso no parece una dirección de correo.","nl":"Dat lijkt geen e-mailadres."},"remote.setup.badPass":{"en":"The password needs at least 8 characters.","fr":"Le mot de passe doit faire au moins 8 caractères.","de":"Das Passwort braucht mindestens 8 Zeichen.","es":"La contraseña necesita al menos 8 caracteres.","nl":"Het wachtwoord heeft minstens 8 tekens nodig."},"remote.setup.noToken":{"en":"Scan the setup code on the board screen to set this board up.","fr":"Scanne le code de configuration affiché sur la cible pour la configurer.","de":"Scanne den Einrichtungscode auf dem Board-Bildschirm, um es einzurichten.","es":"Escanea el código de configuración en la pantalla de la diana para configurarla.","nl":"Scan de installatiecode op het bordscherm om dit bord in te stellen."},"remote.admin.email":{"en":"Owner email","fr":"E-mail du propriétaire","de":"E-Mail des Inhabers","es":"Correo del propietario","nl":"E-mail van eigenaar"},"remote.admin.pass":{"en":"Password","fr":"Mot de passe","de":"Passwort","es":"Contraseña","nl":"Wachtwoord"},"remote.admin.lanOnly":{"en":"Sign-in needs the pub's Wi-Fi. Join it and scan the board's code again.","fr":"La connexion nécessite le Wi-Fi du pub. Connectez-vous et scannez à nouveau le code.","de":"Die Anmeldung erfordert das WLAN des Pubs. Verbinde dich und scanne den Code erneut.","es":"El inicio de sesión requiere el Wi-Fi del bar. Conéctate y escanea el código otra vez.","nl":"Inloggen vereist de wifi van de pub. Maak verbinding en scan de code opnieuw."},"remote.boardGone":{"en":"Board not responding","fr":"La cible ne répond pas","de":"Board antwortet nicht","es":"La diana no responde","nl":"Bord reageert niet"},"remote.notSent":{"en":"Not sent — try again","fr":"Non envoyé — réessayez","de":"Nicht gesendet — nochmal versuchen","es":"No enviado — inténtalo de nuevo","nl":"Niet verzonden — probeer opnieuw"},"remote.seat.lanOnly":{"en":"Seats need the pub's Wi-Fi — you can still score from here","fr":"Les places nécessitent le Wi-Fi du pub — vous pouvez toujours marquer","de":"Plätze brauchen das WLAN des Pubs — punkten geht trotzdem","es":"Los puestos requieren el Wi-Fi del bar — aún puedes puntuar","nl":"Plekken vereisen de wifi van de pub — scoren kan wel"},"remote.identifyHint":{"en":"Sign in above to see the players and your stats.","fr":"Connecte-toi ci-dessus pour voir les joueurs et tes stats.","de":"Melde dich oben an, um die Spieler und deine Statistiken zu sehen.","es":"Inicia sesión arriba para ver los jugadores y tus estadísticas.","nl":"Log hierboven in om de spelers en je statistieken te zien."},"remote.setup.doneTitle":{"en":"This board is yours ✓","fr":"Cette cible est à toi ✓","de":"Dieses Board gehört dir ✓","es":"Esta diana es tuya ✓","nl":"Dit bord is van jou ✓"},"remote.setup.doneBody":{"en":"You are the owner. Sign in with this email on any phone to change venue settings.","fr":"Tu es le propriétaire. Connecte-toi avec cet e-mail depuis n'importe quel téléphone pour changer les réglages du lieu.","de":"Du bist der Inhaber. Melde dich auf jedem Telefon mit dieser E-Mail an, um venue-weite Einstellungen zu ändern.","es":"Eres el propietario. Entra con este correo desde cualquier teléfono para cambiar los ajustes del local.","nl":"Jij bent de eigenaar. Log op elke telefoon in met dit e-mailadres om instellingen voor de locatie te wijzigen."},"remote.setup.doneGo":{"en":"Start playing","fr":"Commencer à jouer","de":"Losspielen","es":"Empezar a jugar","nl":"Beginnen met spelen"},"remote.player.title":{"en":"Sign in to play","fr":"Connecte-toi pour jouer","de":"Zum Spielen anmelden","es":"Entra para jugar","nl":"Log in om te spelen"},"remote.player.sub":{"en":"New here? Create an account — it takes a moment and your stats then follow you to any board.","fr":"Nouveau ? Crée un compte : c'est rapide et tes stats te suivent ensuite sur n'importe quelle cible.","de":"Neu hier? Lege ein Konto an — das dauert einen Moment, danach folgen dir deine Statistiken auf jedes Board.","es":"¿Eres nuevo? Crea una cuenta: es rápido y tus estadísticas te seguirán a cualquier diana.","nl":"Nieuw hier? Maak een account — dat is zo gebeurd en je statistieken volgen je daarna naar elk bord."},"remote.player.go":{"en":"Sign in","fr":"Se connecter","de":"Anmelden","es":"Entrar","nl":"Inloggen"},"remote.player.ok":{"en":"Signed in ✓ — you are in the line-up.","fr":"Connecté ✓ — tu es dans la composition.","de":"Angemeldet ✓ — du bist in der Aufstellung.","es":"Conectado ✓ — estás en la alineación.","nl":"Ingelogd ✓ — je staat in de opstelling."},"remote.player.wrong":{"en":"That email and password did not match.","fr":"Cet e-mail et ce mot de passe ne correspondent pas.","de":"E-Mail und Passwort passen nicht.","es":"Ese correo y contraseña no coinciden.","nl":"Dat e-mailadres en wachtwoord komen niet overeen."},"remote.player.offline":{"en":"Could not reach the account service. Try again in a moment.","fr":"Service de comptes injoignable. Réessaie dans un instant.","de":"Kontodienst nicht erreichbar. Versuche es gleich noch einmal.","es":"No se pudo contactar con el servicio de cuentas. Inténtalo en un momento.","nl":"Accountdienst niet bereikbaar. Probeer het zo nog eens."},"remote.player.register":{"en":"Create account","fr":"Créer un compte","de":"Konto anlegen","es":"Crear cuenta","nl":"Account aanmaken"},"remote.player.registered":{"en":"Account created. Check your email to confirm it, then sign in.","fr":"Compte créé. Confirme-le via l'e-mail reçu, puis connecte-toi.","de":"Konto angelegt. Bestätige es per E-Mail und melde dich dann an.","es":"Cuenta creada. Confírmala desde el correo y luego entra.","nl":"Account aangemaakt. Bevestig het via de e-mail en log daarna in."},"remote.player.taken":{"en":"That email already has an account — sign in instead.","fr":"Cet e-mail a déjà un compte — connecte-toi.","de":"Für diese E-Mail gibt es schon ein Konto — melde dich an.","es":"Ese correo ya tiene cuenta: entra en su lugar.","nl":"Dat e-mailadres heeft al een account — log in."},"remote.player.badPass":{"en":"Pick a password of at least 8 characters.","fr":"Choisis un mot de passe d'au moins 8 caractères.","de":"Wähle ein Passwort mit mindestens 8 Zeichen.","es":"Elige una contraseña de al menos 8 caracteres.","nl":"Kies een wachtwoord van minstens 8 tekens."},"remote.player.useBoardPass":{"en":"Use the board's own password","fr":"Utiliser le mot de passe de la cible","de":"Passwort des Boards verwenden","es":"Usar la contraseña de la diana","nl":"Wachtwoord van het bord gebruiken"},"remote.owner.title":{"en":"Owner account","fr":"Compte propriétaire","de":"Inhaber-Konto","es":"Cuenta del propietario","nl":"Eigenaarsaccount"},"remote.owner.change":{"en":"Change email or password","fr":"Changer l'e-mail ou le mot de passe","de":"E-Mail oder Passwort ändern","es":"Cambiar correo o contraseña","nl":"E-mail of wachtwoord wijzigen"},"remote.owner.sub":{"en":"Enter the current details to prove it is you, then whichever one you want to change. Everyone signed in as admin is signed out.","fr":"Saisis les identifiants actuels pour prouver que c'est toi, puis ce que tu veux changer. Toutes les sessions admin sont déconnectées.","de":"Gib die aktuellen Daten ein, um dich auszuweisen, und dann das, was du ändern willst. Alle Admin-Sitzungen werden abgemeldet.","es":"Introduce los datos actuales para demostrar que eres tú y luego lo que quieras cambiar. Se cierran todas las sesiones de administrador.","nl":"Vul de huidige gegevens in om te bewijzen dat jij het bent, en daarna wat je wilt wijzigen. Alle adminsessies worden afgemeld."},"remote.owner.curEmail":{"en":"Current email","fr":"E-mail actuel","de":"Aktuelle E-Mail","es":"Correo actual","nl":"Huidig e-mailadres"},"remote.owner.curPass":{"en":"Current password","fr":"Mot de passe actuel","de":"Aktuelles Passwort","es":"Contraseña actual","nl":"Huidig wachtwoord"},"remote.owner.newEmail":{"en":"New email (optional)","fr":"Nouvel e-mail (facultatif)","de":"Neue E-Mail (optional)","es":"Correo nuevo (opcional)","nl":"Nieuw e-mailadres (optioneel)"},"remote.owner.newPass":{"en":"New password (optional)","fr":"Nouveau mot de passe (facultatif)","de":"Neues Passwort (optional)","es":"Contraseña nueva (opcional)","nl":"Nieuw wachtwoord (optioneel)"},"remote.owner.save":{"en":"Save","fr":"Enregistrer","de":"Speichern","es":"Guardar","nl":"Opslaan"},"remote.owner.done":{"en":"Saved. Sign in again with the new details.","fr":"Enregistré. Reconnecte-toi avec les nouveaux identifiants.","de":"Gespeichert. Melde dich mit den neuen Daten wieder an.","es":"Guardado. Vuelve a iniciar sesión con los datos nuevos.","nl":"Opgeslagen. Log opnieuw in met de nieuwe gegevens."},"remote.owner.wrong":{"en":"That email and password did not match this board.","fr":"Cet e-mail et ce mot de passe ne correspondent pas à cette cible.","de":"E-Mail und Passwort passen nicht zu diesem Board.","es":"Ese correo y esa contraseña no coinciden con esta diana.","nl":"Dat e-mailadres en wachtwoord horen niet bij dit bord."},"remote.owner.needCurrent":{"en":"Enter the current email and password first.","fr":"Saisis d'abord l'e-mail et le mot de passe actuels.","de":"Gib zuerst die aktuelle E-Mail und das aktuelle Passwort ein.","es":"Introduce primero el correo y la contraseña actuales.","nl":"Vul eerst het huidige e-mailadres en wachtwoord in."},"remote.owner.needNew":{"en":"Fill in a new email or a new password — otherwise there is nothing to change.","fr":"Indique un nouvel e-mail ou un nouveau mot de passe — sinon il n'y a rien à changer.","de":"Gib eine neue E-Mail oder ein neues Passwort an — sonst gibt es nichts zu ändern.","es":"Pon un correo nuevo o una contraseña nueva; si no, no hay nada que cambiar.","nl":"Vul een nieuw e-mailadres of wachtwoord in — anders valt er niets te wijzigen."},"remote.owner.badPass":{"en":"Pick a new password of at least 8 characters.","fr":"Choisis un nouveau mot de passe d'au moins 8 caractères.","de":"Wähle ein neues Passwort mit mindestens 8 Zeichen.","es":"Elige una contraseña nueva de al menos 8 caracteres.","nl":"Kies een nieuw wachtwoord van minstens 8 tekens."},"remote.owner.badEmail":{"en":"That new email does not look like an address.","fr":"Ce nouvel e-mail ne ressemble pas à une adresse.","de":"Die neue E-Mail sieht nicht wie eine Adresse aus.","es":"Ese correo nuevo no parece una dirección.","nl":"Dat nieuwe e-mailadres ziet er niet uit als een adres."},"remote.owner.locked":{"en":"Too many attempts. Wait half a minute and try again.","fr":"Trop de tentatives. Attends une demi-minute et réessaie.","de":"Zu viele Versuche. Warte eine halbe Minute und versuche es erneut.","es":"Demasiados intentos. Espera medio minuto y vuelve a intentarlo.","nl":"Te veel pogingen. Wacht een halve minuut en probeer opnieuw."},"remote.owner.failed":{"en":"Could not save that. Try again.","fr":"Impossible d'enregistrer. Réessaie.","de":"Konnte nicht gespeichert werden. Versuche es erneut.","es":"No se ha podido guardar. Inténtalo de nuevo.","nl":"Kon dit niet opslaan. Probeer het opnieuw."},"remote.card.title":{"en":"Your card","fr":"Ta carte","de":"Deine Karte","es":"Tu tarjeta","nl":"Jouw kaart"},"remote.card.sub":{"en":"A card carries your stats to a board that has never seen you. Get one here, then type it into that board when you arrive.","fr":"Une carte emmène tes stats sur une cible qui ne te connaît pas. Prends-en une ici, puis saisis-la sur cette cible en arrivant.","de":"Eine Karte bringt deine Statistiken auf ein Board, das dich noch nie gesehen hat. Hol dir hier eine und gib sie dort ein, wenn du ankommst.","es":"Una tarjeta lleva tus estadísticas a una diana que no te conoce. Consigue una aquí y escríbela en esa diana al llegar.","nl":"Een kaart neemt je statistieken mee naar een bord dat je nog nooit heeft gezien. Haal er hier een en voer die daar in als je aankomt."},"remote.card.get":{"en":"Get a card","fr":"Obtenir une carte","de":"Karte holen","es":"Obtener tarjeta","nl":"Kaart ophalen"},"remote.card.working":{"en":"Getting one…","fr":"Récupération…","de":"Wird geholt…","es":"Obteniendo…","nl":"Ophalen…"},"remote.card.ok":{"en":"Here it is — copy it now. It is shown once and cannot be shown again.","fr":"La voici — copie-la maintenant. Elle s'affiche une seule fois et ne peut pas être réaffichée.","de":"Hier ist sie — kopiere sie jetzt. Sie wird nur einmal angezeigt und kann nicht erneut angezeigt werden.","es":"Aquí está: cópiala ahora. Se muestra una sola vez y no se puede volver a mostrar.","nl":"Hier is hij — kopieer hem nu. Hij wordt één keer getoond en kan niet opnieuw worden getoond."},"remote.card.failed":{"en":"Could not make a card for this account.","fr":"Impossible de créer une carte pour ce compte.","de":"Für dieses Konto konnte keine Karte erstellt werden.","es":"No se ha podido crear una tarjeta para esta cuenta.","nl":"Kon geen kaart maken voor dit account."},"remote.card.offline":{"en":"Could not reach the account service. Try again in a moment.","fr":"Impossible de joindre le service de comptes. Réessaie dans un instant.","de":"Kontodienst nicht erreichbar. Versuche es gleich noch einmal.","es":"No se ha podido contactar con el servicio de cuentas. Inténtalo en un momento.","nl":"Kon de accountservice niet bereiken. Probeer het zo nog eens."},"remote.card.signIn":{"en":"Sign in first — a card belongs to an account.","fr":"Connecte-toi d'abord — une carte appartient à un compte.","de":"Melde dich zuerst an — eine Karte gehört zu einem Konto.","es":"Inicia sesión primero: una tarjeta pertenece a una cuenta.","nl":"Log eerst in — een kaart hoort bij een account."},"remote.player.email":{"en":"Your email","fr":"Ton e-mail","de":"Deine E-Mail","es":"Tu correo","nl":"Jouw e-mailadres"},"remote.player.pass":{"en":"Your password","fr":"Ton mot de passe","de":"Dein Passwort","es":"Tu contraseña","nl":"Jouw wachtwoord"},"remote.seat.signIn":{"en":"Sign in first — that is how the board knows who you are.","fr":"Connecte-toi d'abord — c'est ainsi que la cible sait qui tu es.","de":"Melde dich zuerst an — so weiß das Board, wer du bist.","es":"Inicia sesión primero: así la diana sabe quién eres.","nl":"Log eerst in — zo weet het bord wie je bent."},"remote.follow.title":{"en":"On the board","fr":"Sur la cible","de":"Auf dem Board","es":"En la diana","nl":"Op het bord"},"remote.follow.sub":{"en":"This one lives on the big screen — look up. Your phone comes back when the board moves on.","fr":"Celui-ci est sur le grand écran — lève les yeux. Ton téléphone revient quand la cible change d'écran.","de":"Das läuft auf dem großen Bildschirm — schau hoch. Dein Telefon kommt zurück, sobald das Board weitergeht.","es":"Esto está en la pantalla grande: levanta la vista. Tu teléfono vuelve cuando la diana cambie.","nl":"Dit staat op het grote scherm — kijk omhoog. Je telefoon komt terug zodra het bord verder gaat."},"remote.notice.mode":{"en":"{who} picked {what}","fr":"{who} a choisi {what}","de":"{who} hat {what} gewählt","es":"{who} ha elegido {what}","nl":"{who} koos {what}"},"remote.notice.bot":{"en":"{who} added a bot","fr":"{who} a ajouté un bot","de":"{who} hat einen Bot hinzugefügt","es":"{who} ha añadido un bot","nl":"{who} voegde een bot toe"},"remote.notice.player":{"en":"{who} added a player","fr":"{who} a ajouté un joueur","de":"{who} hat einen Spieler hinzugefügt","es":"{who} ha añadido un jugador","nl":"{who} voegde een speler toe"},"remote.notice.removed":{"en":"{who} removed someone from the line-up","fr":"{who} a retiré un joueur de la liste","de":"{who} hat jemanden aus der Aufstellung entfernt","es":"{who} ha quitado a alguien de la alineación","nl":"{who} haalde iemand uit de opstelling"},"remote.notice.lineup":{"en":"{who} changed the line-up","fr":"{who} a modifié la liste","de":"{who} hat die Aufstellung geändert","es":"{who} ha cambiado la alineación","nl":"{who} wijzigde de opstelling"},"remote.notice.someone":{"en":"Someone","fr":"Quelqu'un","de":"Jemand","es":"Alguien","nl":"Iemand"},"remote.err.notSetUp":{"en":"This board isn't set up yet.","fr":"Cette cible n'est pas encore configurée.","de":"Dieses Board ist noch nicht eingerichtet.","es":"Esta diana aún no está configurada.","nl":"Dit bord is nog niet ingesteld."},"remote.err.camOff":{"en":"Camera scoring is switched off.","fr":"Le score par caméra est désactivé.","de":"Kamera-Scoring ist ausgeschaltet.","es":"La puntuación por cámara está desactivada.","nl":"Camerascoren staat uit."},"remote.err.adminOnly":{"en":"Only the venue admin can do that.","fr":"Seul l'admin du lieu peut faire ça.","de":"Das kann nur der Venue-Admin.","es":"Eso solo puede hacerlo el admin del local.","nl":"Alleen de locatiebeheerder kan dat."},"remote.start.raced":{"en":"{who} just changed the line-up. Start the game anyway?","fr":"{who} vient de modifier la liste. Lancer quand même la partie ?","de":"{who} hat gerade die Aufstellung geändert. Trotzdem starten?","es":"{who} acaba de cambiar la alineación. ¿Empezar de todos modos?","nl":"{who} heeft net de opstelling gewijzigd. Toch beginnen?"},"remote.player.checking":{"en":"Checking…","fr":"Vérification…","de":"Wird geprüft…","es":"Comprobando…","nl":"Controleren…"},"remote.player.needFields":{"en":"Enter an email address and a password.","fr":"Saisis un e-mail et un mot de passe.","de":"Gib eine E-Mail-Adresse und ein Passwort ein.","es":"Introduce un correo y una contraseña.","nl":"Vul een e-mailadres en een wachtwoord in."}};
+  var I18N = {"remote.title":{"en":"Darts Remote","fr":"Télécommande Darts","de":"Darts-Fernbedienung","es":"Mando Darts","nl":"Darts-afstandsbediening"},"remote.pairHint":{"en":"Enter the 6-digit code shown on the app","fr":"Saisis le code à 6 chiffres affiché dans l'app","de":"Gib den 6-stelligen Code aus der App ein","es":"Introduce el código de 6 dígitos que muestra la app","nl":"Voer de 6-cijferige code uit de app in"},"remote.pairWhere":{"en":"(shown on the board)","fr":"(affiché sur la cible)","de":"(auf dem Board zu sehen)","es":"(se muestra en la diana)","nl":"(te zien op het bord)"},"remote.connect":{"en":"Connect","fr":"Connexion","de":"Verbinden","es":"Conectar","nl":"Verbinden"},"remote.wrongCode":{"en":"Wrong code — check the app.","fr":"Code incorrect — vérifie dans l'app.","de":"Falscher Code — schau in der App nach.","es":"Código incorrecto — compruébalo en la app.","nl":"Verkeerde code — kijk in de app."},"remote.noReach":{"en":"Can't reach the app.","fr":"App injoignable.","de":"App nicht erreichbar.","es":"No se llega a la app.","nl":"App niet bereikbaar."},"remote.connecting":{"en":"Connecting…","fr":"Connexion…","de":"Verbinden…","es":"Conectando…","nl":"Verbinden…"},"remote.connected":{"en":"Connected","fr":"Connecté","de":"Verbunden","es":"Conectado","nl":"Verbonden"},"remote.reconnecting":{"en":"Reconnecting…","fr":"Reconnexion…","de":"Neu verbinden…","es":"Reconectando…","nl":"Opnieuw verbinden…"},"remote.takenOver":{"en":"Another phone took control","fr":"Un autre téléphone a pris le contrôle","de":"Ein anderes Telefon hat übernommen","es":"Otro teléfono tomó el control","nl":"Een andere telefoon nam het over"},"remote.takeControl":{"en":"Take control","fr":"Prendre le contrôle","de":"Übernehmen","es":"Tomar el control","nl":"Overnemen"},"remote.single":{"en":"SINGLE","fr":"SIMPLE","de":"SINGLE","es":"SIMPLE","nl":"ENKEL"},"remote.double":{"en":"DOUBLE","fr":"DOUBLE","de":"DOPPEL","es":"DOBLE","nl":"DUBBEL"},"remote.treble":{"en":"TREBLE","fr":"TRIPLE","de":"TRIPLE","es":"TRIPLE","nl":"TRIPLE"},"remote.bull":{"en":"BULL","fr":"BULL","de":"BULL","es":"BULL","nl":"BULL"},"remote.miss":{"en":"MISS","fr":"MANQUÉ","de":"DANEBEN","es":"FALLO","nl":"MIS"},"remote.undo":{"en":"UNDO","fr":"ANNULER","de":"ZURÜCK","es":"DESHACER","nl":"ONGEDAAN"},"remote.board.title":{"en":"Camera board","fr":"Cible caméra","de":"Kamera-Board","es":"Diana con cámara","nl":"Camerabord"},"remote.board.calibrate":{"en":"Calibrate","fr":"Calibrer","de":"Kalibrieren","es":"Calibrar","nl":"Kalibreren"},"remote.board.reset":{"en":"Reset","fr":"Réinitialiser","de":"Zurücksetzen","es":"Reiniciar","nl":"Resetten"},"remote.board.start":{"en":"Start","fr":"Démarrer","de":"Start","es":"Iniciar","nl":"Starten"},"remote.board.stop":{"en":"Stop","fr":"Arrêter","de":"Stopp","es":"Parar","nl":"Stoppen"},"remote.noGame":{"en":"No game in progress","fr":"Aucune partie en cours","de":"Kein Spiel läuft","es":"Ninguna partida en curso","nl":"Geen partij bezig"},"remote.wins":{"en":"{name} wins","fr":"{name} gagne","de":"{name} gewinnt","es":"Gana {name}","nl":"{name} wint"},"remote.goTo":{"en":"Go to","fr":"Aller à","de":"Gehe zu","es":"Ir a","nl":"Ga naar"},"remote.nav.home":{"en":"Home","fr":"Accueil","de":"Start","es":"Inicio","nl":"Start"},"remote.nav.stats":{"en":"Players & Stats","fr":"Joueurs & stats","de":"Spieler & Statistiken","es":"Jugadores y estadísticas","nl":"Spelers & statistieken"},"remote.nav.party":{"en":"Party Night","fr":"Soirée","de":"Party-Abend","es":"Noche de Fiesta","nl":"Feestavond"},"remote.nav.leagues":{"en":"Leagues","fr":"Ligues","de":"Ligen","es":"Ligas","nl":"Competities"},"remote.nav.recordings":{"en":"Recordings","fr":"Enregistrements","de":"Aufnahmen","es":"Grabaciones","nl":"Opnames"},"remote.nav.settings":{"en":"Settings","fr":"Réglages","de":"Einstellungen","es":"Ajustes","nl":"Instellingen"},"remote.openFullApp":{"en":"Open the full board","fr":"Ouvrir la cible complète","de":"Das ganze Board öffnen","es":"Abrir la diana completa","nl":"Het hele bord openen"},"remote.game":{"en":"Game","fr":"Partie","de":"Spiel","es":"Partida","nl":"Partij"},"remote.lineup":{"en":"Line-up","fr":"Composition","de":"Aufstellung","es":"Alineación","nl":"Opstelling"},"remote.emptySlot":{"en":"Empty slot","fr":"Place libre","de":"Freier Platz","es":"Hueco libre","nl":"Vrije plek"},"remote.addByName":{"en":"Add player by name","fr":"Ajouter un joueur par son nom","de":"Spieler per Name hinzufügen","es":"Añadir jugador por nombre","nl":"Speler op naam toevoegen"},"remote.add":{"en":"Add","fr":"Ajouter","de":"Hinzufügen","es":"Añadir","nl":"Toevoegen"},"remote.addSaved":{"en":"Add a saved player","fr":"Ajouter un joueur enregistré","de":"Gespeicherten Spieler hinzufügen","es":"Añadir un jugador guardado","nl":"Opgeslagen speler toevoegen"},"remote.noProfiles":{"en":"No saved players yet — add one by name above.","fr":"Aucun joueur enregistré — ajoutes-en un par son nom ci-dessus.","de":"Noch keine gespeicherten Spieler — füge oben einen per Name hinzu.","es":"Aún no hay jugadores guardados — añade uno por nombre arriba.","nl":"Nog geen opgeslagen spelers — voeg er hierboven een op naam toe."},"remote.addBot":{"en":"Add a bot","fr":"Ajouter un bot","de":"Bot hinzufügen","es":"Añadir un bot","nl":"Bot toevoegen"},"remote.bot.beginner":{"en":"Beginner bot","fr":"Bot débutant","de":"Anfänger-Bot","es":"Bot principiante","nl":"Beginnersbot"},"remote.bot.medium":{"en":"Medium bot","fr":"Bot moyen","de":"Mittel-Bot","es":"Bot medio","nl":"Gemiddelde bot"},"remote.bot.pro":{"en":"Pro bot","fr":"Bot pro","de":"Profi-Bot","es":"Bot pro","nl":"Probot"},"remote.startGame":{"en":"Start game","fr":"Lancer la partie","de":"Spiel starten","es":"Empezar partida","nl":"Partij starten"},"remote.setUp":{"en":"Set up game","fr":"Configurer la partie","de":"Spiel einrichten","es":"Configurar partida","nl":"Spel instellen"},"remote.needPlayers":{"en":"Add at least 2 players","fr":"Ajoute au moins 2 joueurs","de":"Mindestens 2 Spieler hinzufügen","es":"Añade al menos 2 jugadores","nl":"Voeg minstens 2 spelers toe"},"remote.set.soundCaller":{"en":"Sound & caller","fr":"Son & annonceur","de":"Ton & Ansager","es":"Sonido y locutor","nl":"Geluid & omroeper"},"remote.set.sound":{"en":"Sound","fr":"Son","de":"Ton","es":"Sonido","nl":"Geluid"},"remote.set.caller":{"en":"Caller (spoken)","fr":"Annonceur (voix)","de":"Ansager (gesprochen)","es":"Locutor (voz)","nl":"Omroeper (gesproken)"},"remote.set.atmosphere":{"en":"3D atmosphere","fr":"Ambiance 3D","de":"3D-Atmosphäre","es":"Ambiente 3D","nl":"3D-sfeer"},"remote.set.atmosphereSound":{"en":"Atmosphere sound","fr":"Son d'ambiance","de":"Atmosphären-Ton","es":"Sonido de ambiente","nl":"Sfeergeluid"},"remote.set.masterVolume":{"en":"Master volume","fr":"Volume général","de":"Gesamtlautstärke","es":"Volumen general","nl":"Hoofdvolume"},"remote.set.boardScale":{"en":"Board scale","fr":"Échelle du tableau","de":"Board-Größe","es":"Escala del tablero","nl":"Bordschaal"},"remote.set.voiceGender":{"en":"Caller voice","fr":"Voix de l'annonceur","de":"Ansager-Stimme","es":"Voz del locutor","nl":"Stem omroeper"},"remote.set.female":{"en":"Female","fr":"Féminine","de":"Weiblich","es":"Femenina","nl":"Vrouw"},"remote.set.male":{"en":"Male","fr":"Masculine","de":"Männlich","es":"Masculina","nl":"Man"},"remote.set.walkOn":{"en":"Walk-on video","fr":"Vidéo d'entrée","de":"Walk-on-Video","es":"Vídeo de entrada","nl":"Opkomstvideo"},"remote.set.off":{"en":"Off","fr":"Désactivé","de":"Aus","es":"Desactivado","nl":"Uit"},"remote.set.firstLeg":{"en":"First leg","fr":"Premier leg","de":"Erstes Leg","es":"Primer leg","nl":"Eerste leg"},"remote.set.everyLeg":{"en":"Every leg","fr":"Chaque leg","de":"Jedes Leg","es":"Cada leg","nl":"Elke leg"},"remote.set.turnTimer":{"en":"Turn timer","fr":"Chrono de volée","de":"Aufnahme-Timer","es":"Cronómetro de turno","nl":"Beurtklok"},"remote.set.presentation":{"en":"Presentation","fr":"Présentation","de":"Präsentation","es":"Presentación","nl":"Presentatie"},"remote.set.theme":{"en":"Theme","fr":"Thème","de":"Design","es":"Tema","nl":"Thema"},"remote.sug.new":{"en":"New suggestion","fr":"Nouvelle suggestion","de":"Neuer Vorschlag","es":"Nueva sugerencia","nl":"Nieuwe suggestie"},"remote.sug.placeholder":{"en":"Describe your idea… it's stamped with where you are in the app, and sent to the developer next time you press Send on the PC.","fr":"Décris ton idée… elle est marquée de l'endroit où tu es dans l'app, et envoyée au développeur la prochaine fois que tu appuies sur Envoyer sur le PC.","de":"Beschreib deine Idee… sie wird mit deiner Stelle in der App versehen und beim nächsten Senden am PC an den Entwickler geschickt.","es":"Describe tu idea… se marca con el lugar donde estás en la app y se envía al desarrollador la próxima vez que pulses Enviar en el PC.","nl":"Beschrijf je idee… het wordt gemarkeerd met waar je bent in de app en naar de ontwikkelaar gestuurd zodra je op de pc op Verzenden drukt."},"remote.sug.save":{"en":"Save suggestion","fr":"Enregistrer la suggestion","de":"Vorschlag speichern","es":"Guardar sugerencia","nl":"Suggestie opslaan"},"remote.sug.saved":{"en":"Saved ✓ — send from the PC when ready.","fr":"Enregistré ✓ — envoie depuis le PC quand tu veux.","de":"Gespeichert ✓ — sende es vom PC, wenn du so weit bist.","es":"Guardada ✓ — envíala desde el PC cuando quieras.","nl":"Opgeslagen ✓ — verstuur vanaf de pc wanneer je wilt."},"remote.sug.savedSync":{"en":"Saved ✓ — it goes to the developer with this board’s next sync.","fr":"Enregistré ✓ — envoyé au développeur à la prochaine synchro de cette cible.","de":"Gespeichert ✓ — geht mit der nächsten Synchronisierung dieses Boards an den Entwickler.","es":"Guardado ✓: se envía al desarrollador con la próxima sincronización de esta diana.","nl":"Opgeslagen ✓ — gaat met de volgende synchronisatie van dit bord naar de ontwikkelaar."},"remote.sug.count_one":{"en":"{count} suggestion saved on this PC.","fr":"{count} suggestion enregistrée sur ce PC.","de":"{count} Vorschlag auf diesem PC gespeichert.","es":"{count} sugerencia guardada en este PC.","nl":"{count} suggestie opgeslagen op deze pc."},"remote.sug.count_other":{"en":"{count} suggestions saved on this PC.","fr":"{count} suggestions enregistrées sur ce PC.","de":"{count} Vorschläge auf diesem PC gespeichert.","es":"{count} sugerencias guardadas en este PC.","nl":"{count} suggesties opgeslagen op deze pc."},"remote.tab.settings":{"en":"Settings","fr":"Réglages","de":"Einstell.","es":"Ajustes","nl":"Instell."},"remote.here.home":{"en":"Home","fr":"Accueil","de":"Start","es":"Inicio","nl":"Start"},"remote.here.stats":{"en":"Players","fr":"Joueurs","de":"Spieler","es":"Jugadores","nl":"Spelers"},"remote.here.party":{"en":"Party Night","fr":"Soirée","de":"Party-Abend","es":"Noche de Fiesta","nl":"Feestavond"},"remote.here.settings":{"en":"Settings","fr":"Réglages","de":"Einstellungen","es":"Ajustes","nl":"Instellingen"},"remote.here.recordings":{"en":"Recordings","fr":"Enregistrements","de":"Aufnahmen","es":"Grabaciones","nl":"Opnames"},"remote.here.leagues":{"en":"Leagues","fr":"Ligues","de":"Ligen","es":"Ligas","nl":"Competities"},"remote.here.setup":{"en":"Set up","fr":"Préparation","de":"Einrichten","es":"Preparación","nl":"Opzetten"},"remote.here.play":{"en":"Playing","fr":"En jeu","de":"Im Spiel","es":"En juego","nl":"In het spel"},"remote.here.player":{"en":"Player","fr":"Joueur","de":"Spieler","es":"Jugador","nl":"Speler"},"remote.here.league":{"en":"League","fr":"Ligue","de":"Liga","es":"Liga","nl":"Competitie"},"remote.here.compare":{"en":"Compare","fr":"Comparer","de":"Vergleichen","es":"Comparar","nl":"Vergelijken"},"remote.here.test":{"en":"Test","fr":"Test","de":"Test","es":"Test","nl":"Test"},"remote.fullscreen":{"en":"Full screen","fr":"Plein écran","de":"Vollbild","es":"Pantalla completa","nl":"Volledig scherm"},"remote.fullscreenIos":{"en":"Full screen (add to Home Screen)","fr":"Plein écran (ajouter à l'écran d'accueil)","de":"Vollbild (zum Home-Bildschirm hinzufügen)","es":"Pantalla completa (añadir a pantalla de inicio)","nl":"Volledig scherm (zet op beginscherm)"},"remote.fullscreenIosHow":{"en":"iPhone has no full-screen button in the browser. To get one: tap Share, then \"Add to Home Screen\", and open the remote from that icon.","fr":"L'iPhone n'a pas de plein écran dans le navigateur. Pour l'obtenir : appuie sur Partager, puis « Sur l'écran d'accueil », et ouvre la télécommande depuis cette icône.","de":"Das iPhone hat im Browser keinen Vollbildmodus. So geht es: auf Teilen tippen, dann \"Zum Home-Bildschirm\", und die Fernbedienung über dieses Symbol öffnen.","es":"El iPhone no tiene pantalla completa en el navegador. Para conseguirla: toca Compartir, luego \"Añadir a pantalla de inicio\", y abre el mando desde ese icono.","nl":"De iPhone heeft geen volledig scherm in de browser. Zo wel: tik op Delen, dan \"Zet op beginscherm\", en open de afstandsbediening via dat icoon."},"remote.sug.photo":{"en":"Add a photo","fr":"Ajouter une photo","de":"Foto hinzufügen","es":"Añadir una foto","nl":"Foto toevoegen"},"remote.sug.photoClear":{"en":"Remove photo","fr":"Retirer la photo","de":"Foto entfernen","es":"Quitar la foto","nl":"Foto verwijderen"},"remote.sug.photoWorking":{"en":"Shrinking the photo…","fr":"Compression de la photo…","de":"Foto wird verkleinert…","es":"Reduciendo la foto…","nl":"Foto verkleinen…"},"remote.sug.photoTooBig":{"en":"That photo is too big to send. Try another one.","fr":"Cette photo est trop lourde à envoyer. Essaie-en une autre.","de":"Dieses Foto ist zu groß zum Senden. Versuch ein anderes.","es":"Esa foto es demasiado grande para enviarla. Prueba con otra.","nl":"Die foto is te groot om te versturen. Probeer een andere."},"remote.tab.player":{"en":"Player","fr":"Joueur","de":"Spieler","es":"Jugador","nl":"Speler"},"remote.tab.game":{"en":"Game","fr":"Partie","de":"Spiel","es":"Partida","nl":"Spel"},"remote.tab.stats":{"en":"Stats","fr":"Stats","de":"Statistik","es":"Estad.","nl":"Stats"},"remote.tab.suggest":{"en":"Idea","fr":"Idée","de":"Idee","es":"Idea","nl":"Idee"},"remote.notYourTurn":{"en":"It's not your turn — that dart wasn't counted.","fr":"Ce n'est pas ton tour — cette fléchette n'a pas été comptée.","de":"Du bist nicht dran — dieser Dart wurde nicht gezählt.","es":"No es tu turno: ese dardo no se ha contado.","nl":"Je bent niet aan de beurt — die dart is niet geteld."},"remote.seat.release":{"en":"That is not me","fr":"Ce n'est pas moi","de":"Das bin ich nicht","es":"Ese no soy yo","nl":"Dat ben ik niet"},"remote.stats.standings":{"en":"This game","fr":"Cette partie","de":"Dieses Spiel","es":"Esta partida","nl":"Dit spel"},"remote.stats.career":{"en":"At this board","fr":"Sur cette cible","de":"An diesem Board","es":"En esta diana","nl":"Op dit bord"},"remote.stats.noGame":{"en":"No game running.","fr":"Aucune partie en cours.","de":"Kein Spiel läuft.","es":"No hay partida en curso.","nl":"Geen spel bezig."},"remote.stats.noCareer":{"en":"No players yet.","fr":"Aucun joueur pour l'instant.","de":"Noch keine Spieler.","es":"Todavía no hay jugadores.","nl":"Nog geen spelers."},"remote.stats.score":{"en":"left","fr":"restant","de":"übrig","es":"restan","nl":"resterend"},"remote.stats.avg":{"en":"avg","fr":"moy.","de":"Schnitt","es":"prom.","nl":"gem."},"remote.stats.games":{"en":"games","fr":"parties","de":"Spiele","es":"partidas","nl":"spellen"},"remote.stats.win":{"en":"won","fr":"gagné","de":"gewonnen","es":"ganado","nl":"gewonnen"},"remote.admin.title":{"en":"Venue admin","fr":"Admin du lieu","de":"Venue-Admin","es":"Admin del local","nl":"Locatiebeheer"},"remote.admin.sub":{"en":"Sign in with the board owner account to change settings, move the big screen or control the board.","fr":"Connecte-toi avec le compte propriétaire pour changer les réglages, déplacer l'écran ou piloter la cible.","de":"Melde dich mit dem Inhaber-Konto an, um Einstellungen zu ändern, den großen Bildschirm zu wechseln oder das Board zu steuern.","es":"Inicia sesión con la cuenta del propietario para cambiar ajustes, mover la pantalla grande o controlar la diana.","nl":"Log in met het eigenaarsaccount om instellingen te wijzigen, het grote scherm te wisselen of het bord te bedienen."},"remote.admin.ok":{"en":"Unlocked.","fr":"Déverrouillé.","de":"Entsperrt.","es":"Desbloqueado.","nl":"Ontgrendeld."},"remote.admin.wrong":{"en":"Wrong PIN.","fr":"Code incorrect.","de":"Falsche PIN.","es":"PIN incorrecto.","nl":"Verkeerde code."},"remote.admin.failed":{"en":"Could not reach the board.","fr":"Cible injoignable.","de":"Board nicht erreichbar.","es":"No se pudo contactar con la diana.","nl":"Bord niet bereikbaar."},"remote.setup.title":{"en":"Set up this board","fr":"Configurer cette cible","de":"Dieses Board einrichten","es":"Configurar esta diana","nl":"Dit bord instellen"},"remote.setup.sub":{"en":"This board is new. Create the owner account — you will sign in with it to change anything venue-wide.","fr":"Cette cible est neuve. Crée le compte propriétaire : tu t'y connecteras pour tout changement général.","de":"Dieses Board ist neu. Lege das Inhaber-Konto an — damit meldest du dich für alle venue-weiten Änderungen an.","es":"Esta diana es nueva. Crea la cuenta del propietario: con ella entrarás para cambiar cualquier cosa del local.","nl":"Dit bord is nieuw. Maak het eigenaarsaccount aan — daarmee log je in voor alles wat de hele locatie raakt."},"remote.setup.name":{"en":"Your name","fr":"Ton nom","de":"Dein Name","es":"Tu nombre","nl":"Jouw naam"},"remote.setup.go":{"en":"Set up the board","fr":"Configurer la cible","de":"Board einrichten","es":"Configurar la diana","nl":"Bord instellen"},"remote.setup.needName":{"en":"Enter your name.","fr":"Saisis ton nom.","de":"Gib deinen Namen ein.","es":"Escribe tu nombre.","nl":"Vul je naam in."},"remote.setup.mismatch":{"en":"The two PINs do not match.","fr":"Les deux codes ne correspondent pas.","de":"Die beiden PINs stimmen nicht überein.","es":"Los dos PIN no coinciden.","nl":"De twee codes komen niet overeen."},"remote.setup.taken":{"en":"Somebody just set this board up.","fr":"Quelqu'un vient de configurer cette cible.","de":"Jemand hat dieses Board gerade eingerichtet.","es":"Alguien acaba de configurar esta diana.","nl":"Iemand heeft dit bord net ingesteld."},"remote.setup.failed":{"en":"Setup failed. Try again.","fr":"Échec de la configuration. Réessaie.","de":"Einrichtung fehlgeschlagen. Versuch es erneut.","es":"La configuración falló. Inténtalo de nuevo.","nl":"Instellen mislukt. Probeer opnieuw."},"remote.admin.signIn":{"en":"Sign in","fr":"Se connecter","de":"Anmelden","es":"Entrar","nl":"Inloggen"},"remote.setup.email":{"en":"Your email","fr":"Ton e-mail","de":"Deine E-Mail","es":"Tu correo","nl":"Je e-mail"},"remote.setup.pass":{"en":"Choose a password","fr":"Choisis un mot de passe","de":"Passwort wählen","es":"Elige una contraseña","nl":"Kies een wachtwoord"},"remote.setup.pass2":{"en":"Repeat the password","fr":"Répète le mot de passe","de":"Passwort wiederholen","es":"Repite la contraseña","nl":"Herhaal het wachtwoord"},"remote.setup.badEmail":{"en":"That does not look like an email address.","fr":"Cela ne ressemble pas à une adresse e-mail.","de":"Das sieht nicht nach einer E-Mail-Adresse aus.","es":"Eso no parece una dirección de correo.","nl":"Dat lijkt geen e-mailadres."},"remote.setup.badPass":{"en":"The password needs at least 8 characters.","fr":"Le mot de passe doit faire au moins 8 caractères.","de":"Das Passwort braucht mindestens 8 Zeichen.","es":"La contraseña necesita al menos 8 caracteres.","nl":"Het wachtwoord heeft minstens 8 tekens nodig."},"remote.setup.noToken":{"en":"Scan the setup code on the board screen to set this board up.","fr":"Scanne le code de configuration affiché sur la cible pour la configurer.","de":"Scanne den Einrichtungscode auf dem Board-Bildschirm, um es einzurichten.","es":"Escanea el código de configuración en la pantalla de la diana para configurarla.","nl":"Scan de installatiecode op het bordscherm om dit bord in te stellen."},"remote.admin.email":{"en":"Owner email","fr":"E-mail du propriétaire","de":"E-Mail des Inhabers","es":"Correo del propietario","nl":"E-mail van eigenaar"},"remote.admin.pass":{"en":"Password","fr":"Mot de passe","de":"Passwort","es":"Contraseña","nl":"Wachtwoord"},"remote.admin.lanOnly":{"en":"Sign-in needs the pub's Wi-Fi. Join it and scan the board's code again.","fr":"La connexion nécessite le Wi-Fi du pub. Connectez-vous et scannez à nouveau le code.","de":"Die Anmeldung erfordert das WLAN des Pubs. Verbinde dich und scanne den Code erneut.","es":"El inicio de sesión requiere el Wi-Fi del bar. Conéctate y escanea el código otra vez.","nl":"Inloggen vereist de wifi van de pub. Maak verbinding en scan de code opnieuw."},"remote.boardGone":{"en":"Board not responding","fr":"La cible ne répond pas","de":"Board antwortet nicht","es":"La diana no responde","nl":"Bord reageert niet"},"remote.notSent":{"en":"Not sent — try again","fr":"Non envoyé — réessayez","de":"Nicht gesendet — nochmal versuchen","es":"No enviado — inténtalo de nuevo","nl":"Niet verzonden — probeer opnieuw"},"remote.identifyHint":{"en":"Sign in above to see the players and your stats.","fr":"Connecte-toi ci-dessus pour voir les joueurs et tes stats.","de":"Melde dich oben an, um die Spieler und deine Statistiken zu sehen.","es":"Inicia sesión arriba para ver los jugadores y tus estadísticas.","nl":"Log hierboven in om de spelers en je statistieken te zien."},"remote.setup.doneTitle":{"en":"This board is yours ✓","fr":"Cette cible est à toi ✓","de":"Dieses Board gehört dir ✓","es":"Esta diana es tuya ✓","nl":"Dit bord is van jou ✓"},"remote.setup.doneBody":{"en":"You are the owner. Sign in with this email on any phone to change venue settings.","fr":"Tu es le propriétaire. Connecte-toi avec cet e-mail depuis n'importe quel téléphone pour changer les réglages du lieu.","de":"Du bist der Inhaber. Melde dich auf jedem Telefon mit dieser E-Mail an, um venue-weite Einstellungen zu ändern.","es":"Eres el propietario. Entra con este correo desde cualquier teléfono para cambiar los ajustes del local.","nl":"Jij bent de eigenaar. Log op elke telefoon in met dit e-mailadres om instellingen voor de locatie te wijzigen."},"remote.setup.doneGo":{"en":"Start playing","fr":"Commencer à jouer","de":"Losspielen","es":"Empezar a jugar","nl":"Beginnen met spelen"},"remote.player.title":{"en":"Sign in to play","fr":"Connecte-toi pour jouer","de":"Zum Spielen anmelden","es":"Entra para jugar","nl":"Log in om te spelen"},"remote.player.sub":{"en":"New here? Create an account — it takes a moment and your stats then follow you to any board.","fr":"Nouveau ? Crée un compte : c'est rapide et tes stats te suivent ensuite sur n'importe quelle cible.","de":"Neu hier? Lege ein Konto an — das dauert einen Moment, danach folgen dir deine Statistiken auf jedes Board.","es":"¿Eres nuevo? Crea una cuenta: es rápido y tus estadísticas te seguirán a cualquier diana.","nl":"Nieuw hier? Maak een account — dat is zo gebeurd en je statistieken volgen je daarna naar elk bord."},"remote.player.go":{"en":"Sign in","fr":"Se connecter","de":"Anmelden","es":"Entrar","nl":"Inloggen"},"remote.player.ok":{"en":"Signed in ✓ — you are in the line-up.","fr":"Connecté ✓ — tu es dans la composition.","de":"Angemeldet ✓ — du bist in der Aufstellung.","es":"Conectado ✓ — estás en la alineación.","nl":"Ingelogd ✓ — je staat in de opstelling."},"remote.player.wrong":{"en":"That email and password did not match.","fr":"Cet e-mail et ce mot de passe ne correspondent pas.","de":"E-Mail und Passwort passen nicht.","es":"Ese correo y contraseña no coinciden.","nl":"Dat e-mailadres en wachtwoord komen niet overeen."},"remote.player.offline":{"en":"Could not reach the account service. Try again in a moment.","fr":"Service de comptes injoignable. Réessaie dans un instant.","de":"Kontodienst nicht erreichbar. Versuche es gleich noch einmal.","es":"No se pudo contactar con el servicio de cuentas. Inténtalo en un momento.","nl":"Accountdienst niet bereikbaar. Probeer het zo nog eens."},"remote.player.register":{"en":"Create account","fr":"Créer un compte","de":"Konto anlegen","es":"Crear cuenta","nl":"Account aanmaken"},"remote.player.registered":{"en":"Account created. Check your email to confirm it, then sign in.","fr":"Compte créé. Confirme-le via l'e-mail reçu, puis connecte-toi.","de":"Konto angelegt. Bestätige es per E-Mail und melde dich dann an.","es":"Cuenta creada. Confírmala desde el correo y luego entra.","nl":"Account aangemaakt. Bevestig het via de e-mail en log daarna in."},"remote.player.taken":{"en":"That email already has an account — sign in instead.","fr":"Cet e-mail a déjà un compte — connecte-toi.","de":"Für diese E-Mail gibt es schon ein Konto — melde dich an.","es":"Ese correo ya tiene cuenta: entra en su lugar.","nl":"Dat e-mailadres heeft al een account — log in."},"remote.player.badPass":{"en":"Pick a password of at least 8 characters.","fr":"Choisis un mot de passe d'au moins 8 caractères.","de":"Wähle ein Passwort mit mindestens 8 Zeichen.","es":"Elige una contraseña de al menos 8 caracteres.","nl":"Kies een wachtwoord van minstens 8 tekens."},"remote.player.useBoardPass":{"en":"Use the board's own password","fr":"Utiliser le mot de passe de la cible","de":"Passwort des Boards verwenden","es":"Usar la contraseña de la diana","nl":"Wachtwoord van het bord gebruiken"},"remote.owner.title":{"en":"Owner account","fr":"Compte propriétaire","de":"Inhaber-Konto","es":"Cuenta del propietario","nl":"Eigenaarsaccount"},"remote.owner.change":{"en":"Change email or password","fr":"Changer l'e-mail ou le mot de passe","de":"E-Mail oder Passwort ändern","es":"Cambiar correo o contraseña","nl":"E-mail of wachtwoord wijzigen"},"remote.owner.sub":{"en":"Enter the current details to prove it is you, then whichever one you want to change. Everyone signed in as admin is signed out.","fr":"Saisis les identifiants actuels pour prouver que c'est toi, puis ce que tu veux changer. Toutes les sessions admin sont déconnectées.","de":"Gib die aktuellen Daten ein, um dich auszuweisen, und dann das, was du ändern willst. Alle Admin-Sitzungen werden abgemeldet.","es":"Introduce los datos actuales para demostrar que eres tú y luego lo que quieras cambiar. Se cierran todas las sesiones de administrador.","nl":"Vul de huidige gegevens in om te bewijzen dat jij het bent, en daarna wat je wilt wijzigen. Alle adminsessies worden afgemeld."},"remote.owner.curEmail":{"en":"Current email","fr":"E-mail actuel","de":"Aktuelle E-Mail","es":"Correo actual","nl":"Huidig e-mailadres"},"remote.owner.curPass":{"en":"Current password","fr":"Mot de passe actuel","de":"Aktuelles Passwort","es":"Contraseña actual","nl":"Huidig wachtwoord"},"remote.owner.newEmail":{"en":"New email (optional)","fr":"Nouvel e-mail (facultatif)","de":"Neue E-Mail (optional)","es":"Correo nuevo (opcional)","nl":"Nieuw e-mailadres (optioneel)"},"remote.owner.newPass":{"en":"New password (optional)","fr":"Nouveau mot de passe (facultatif)","de":"Neues Passwort (optional)","es":"Contraseña nueva (opcional)","nl":"Nieuw wachtwoord (optioneel)"},"remote.owner.save":{"en":"Save","fr":"Enregistrer","de":"Speichern","es":"Guardar","nl":"Opslaan"},"remote.owner.done":{"en":"Saved. Sign in again with the new details.","fr":"Enregistré. Reconnecte-toi avec les nouveaux identifiants.","de":"Gespeichert. Melde dich mit den neuen Daten wieder an.","es":"Guardado. Vuelve a iniciar sesión con los datos nuevos.","nl":"Opgeslagen. Log opnieuw in met de nieuwe gegevens."},"remote.owner.wrong":{"en":"That email and password did not match this board.","fr":"Cet e-mail et ce mot de passe ne correspondent pas à cette cible.","de":"E-Mail und Passwort passen nicht zu diesem Board.","es":"Ese correo y esa contraseña no coinciden con esta diana.","nl":"Dat e-mailadres en wachtwoord horen niet bij dit bord."},"remote.owner.needCurrent":{"en":"Enter the current email and password first.","fr":"Saisis d'abord l'e-mail et le mot de passe actuels.","de":"Gib zuerst die aktuelle E-Mail und das aktuelle Passwort ein.","es":"Introduce primero el correo y la contraseña actuales.","nl":"Vul eerst het huidige e-mailadres en wachtwoord in."},"remote.owner.needNew":{"en":"Fill in a new email or a new password — otherwise there is nothing to change.","fr":"Indique un nouvel e-mail ou un nouveau mot de passe — sinon il n'y a rien à changer.","de":"Gib eine neue E-Mail oder ein neues Passwort an — sonst gibt es nichts zu ändern.","es":"Pon un correo nuevo o una contraseña nueva; si no, no hay nada que cambiar.","nl":"Vul een nieuw e-mailadres of wachtwoord in — anders valt er niets te wijzigen."},"remote.owner.badPass":{"en":"Pick a new password of at least 8 characters.","fr":"Choisis un nouveau mot de passe d'au moins 8 caractères.","de":"Wähle ein neues Passwort mit mindestens 8 Zeichen.","es":"Elige una contraseña nueva de al menos 8 caracteres.","nl":"Kies een nieuw wachtwoord van minstens 8 tekens."},"remote.owner.badEmail":{"en":"That new email does not look like an address.","fr":"Ce nouvel e-mail ne ressemble pas à une adresse.","de":"Die neue E-Mail sieht nicht wie eine Adresse aus.","es":"Ese correo nuevo no parece una dirección.","nl":"Dat nieuwe e-mailadres ziet er niet uit als een adres."},"remote.owner.locked":{"en":"Too many attempts. Wait half a minute and try again.","fr":"Trop de tentatives. Attends une demi-minute et réessaie.","de":"Zu viele Versuche. Warte eine halbe Minute und versuche es erneut.","es":"Demasiados intentos. Espera medio minuto y vuelve a intentarlo.","nl":"Te veel pogingen. Wacht een halve minuut en probeer opnieuw."},"remote.owner.failed":{"en":"Could not save that. Try again.","fr":"Impossible d'enregistrer. Réessaie.","de":"Konnte nicht gespeichert werden. Versuche es erneut.","es":"No se ha podido guardar. Inténtalo de nuevo.","nl":"Kon dit niet opslaan. Probeer het opnieuw."},"remote.card.title":{"en":"Your card","fr":"Ta carte","de":"Deine Karte","es":"Tu tarjeta","nl":"Jouw kaart"},"remote.card.sub":{"en":"A card carries your stats to a board that has never seen you. Get one here, then type it into that board when you arrive.","fr":"Une carte emmène tes stats sur une cible qui ne te connaît pas. Prends-en une ici, puis saisis-la sur cette cible en arrivant.","de":"Eine Karte bringt deine Statistiken auf ein Board, das dich noch nie gesehen hat. Hol dir hier eine und gib sie dort ein, wenn du ankommst.","es":"Una tarjeta lleva tus estadísticas a una diana que no te conoce. Consigue una aquí y escríbela en esa diana al llegar.","nl":"Een kaart neemt je statistieken mee naar een bord dat je nog nooit heeft gezien. Haal er hier een en voer die daar in als je aankomt."},"remote.card.get":{"en":"Get a card","fr":"Obtenir une carte","de":"Karte holen","es":"Obtener tarjeta","nl":"Kaart ophalen"},"remote.card.working":{"en":"Getting one…","fr":"Récupération…","de":"Wird geholt…","es":"Obteniendo…","nl":"Ophalen…"},"remote.card.ok":{"en":"Here it is — copy it now. It is shown once and cannot be shown again.","fr":"La voici — copie-la maintenant. Elle s'affiche une seule fois et ne peut pas être réaffichée.","de":"Hier ist sie — kopiere sie jetzt. Sie wird nur einmal angezeigt und kann nicht erneut angezeigt werden.","es":"Aquí está: cópiala ahora. Se muestra una sola vez y no se puede volver a mostrar.","nl":"Hier is hij — kopieer hem nu. Hij wordt één keer getoond en kan niet opnieuw worden getoond."},"remote.card.failed":{"en":"Could not make a card for this account.","fr":"Impossible de créer une carte pour ce compte.","de":"Für dieses Konto konnte keine Karte erstellt werden.","es":"No se ha podido crear una tarjeta para esta cuenta.","nl":"Kon geen kaart maken voor dit account."},"remote.card.offline":{"en":"Could not reach the account service. Try again in a moment.","fr":"Impossible de joindre le service de comptes. Réessaie dans un instant.","de":"Kontodienst nicht erreichbar. Versuche es gleich noch einmal.","es":"No se ha podido contactar con el servicio de cuentas. Inténtalo en un momento.","nl":"Kon de accountservice niet bereiken. Probeer het zo nog eens."},"remote.card.signIn":{"en":"Sign in first — a card belongs to an account.","fr":"Connecte-toi d'abord — une carte appartient à un compte.","de":"Melde dich zuerst an — eine Karte gehört zu einem Konto.","es":"Inicia sesión primero: una tarjeta pertenece a una cuenta.","nl":"Log eerst in — een kaart hoort bij een account."},"remote.player.email":{"en":"Your email","fr":"Ton e-mail","de":"Deine E-Mail","es":"Tu correo","nl":"Jouw e-mailadres"},"remote.player.pass":{"en":"Your password","fr":"Ton mot de passe","de":"Dein Passwort","es":"Tu contraseña","nl":"Jouw wachtwoord"},"remote.seat.signIn":{"en":"Sign in first — that is how the board knows who you are.","fr":"Connecte-toi d'abord — c'est ainsi que la cible sait qui tu es.","de":"Melde dich zuerst an — so weiß das Board, wer du bist.","es":"Inicia sesión primero: así la diana sabe quién eres.","nl":"Log eerst in — zo weet het bord wie je bent."},"remote.seat.failed":{"en":"Could not save that. Try again.","fr":"Enregistrement impossible. Réessaie.","de":"Konnte nicht gespeichert werden. Versuch es erneut.","es":"No se pudo guardar. Inténtalo de nuevo.","nl":"Opslaan mislukt. Probeer opnieuw."},"remote.follow.title":{"en":"On the board","fr":"Sur la cible","de":"Auf dem Board","es":"En la diana","nl":"Op het bord"},"remote.follow.sub":{"en":"This one lives on the big screen — look up. Your phone comes back when the board moves on.","fr":"Celui-ci est sur le grand écran — lève les yeux. Ton téléphone revient quand la cible change d'écran.","de":"Das läuft auf dem großen Bildschirm — schau hoch. Dein Telefon kommt zurück, sobald das Board weitergeht.","es":"Esto está en la pantalla grande: levanta la vista. Tu teléfono vuelve cuando la diana cambie.","nl":"Dit staat op het grote scherm — kijk omhoog. Je telefoon komt terug zodra het bord verder gaat."},"remote.notice.mode":{"en":"{who} picked {what}","fr":"{who} a choisi {what}","de":"{who} hat {what} gewählt","es":"{who} ha elegido {what}","nl":"{who} koos {what}"},"remote.notice.bot":{"en":"{who} added a bot","fr":"{who} a ajouté un bot","de":"{who} hat einen Bot hinzugefügt","es":"{who} ha añadido un bot","nl":"{who} voegde een bot toe"},"remote.notice.player":{"en":"{who} added a player","fr":"{who} a ajouté un joueur","de":"{who} hat einen Spieler hinzugefügt","es":"{who} ha añadido un jugador","nl":"{who} voegde een speler toe"},"remote.notice.removed":{"en":"{who} removed someone from the line-up","fr":"{who} a retiré un joueur de la liste","de":"{who} hat jemanden aus der Aufstellung entfernt","es":"{who} ha quitado a alguien de la alineación","nl":"{who} haalde iemand uit de opstelling"},"remote.notice.lineup":{"en":"{who} changed the line-up","fr":"{who} a modifié la liste","de":"{who} hat die Aufstellung geändert","es":"{who} ha cambiado la alineación","nl":"{who} wijzigde de opstelling"},"remote.notice.someone":{"en":"Someone","fr":"Quelqu'un","de":"Jemand","es":"Alguien","nl":"Iemand"},"remote.err.notSetUp":{"en":"This board isn't set up yet.","fr":"Cette cible n'est pas encore configurée.","de":"Dieses Board ist noch nicht eingerichtet.","es":"Esta diana aún no está configurada.","nl":"Dit bord is nog niet ingesteld."},"remote.err.camOff":{"en":"Camera scoring is switched off.","fr":"Le score par caméra est désactivé.","de":"Kamera-Scoring ist ausgeschaltet.","es":"La puntuación por cámara está desactivada.","nl":"Camerascoren staat uit."},"remote.err.gone":{"en":"That has gone from the board.","fr":"Ce choix a disparu de l'écran.","de":"Das ist vom Board verschwunden.","es":"Eso ya no está en la pantalla.","nl":"Dat staat niet meer op het bord."},"remote.err.adminOnly":{"en":"Only the venue admin can do that.","fr":"Seul l'admin du lieu peut faire ça.","de":"Das kann nur der Venue-Admin.","es":"Eso solo puede hacerlo el admin del local.","nl":"Alleen de locatiebeheerder kan dat."},"remote.start.raced":{"en":"{who} just changed the line-up. Start the game anyway?","fr":"{who} vient de modifier la liste. Lancer quand même la partie ?","de":"{who} hat gerade die Aufstellung geändert. Trotzdem starten?","es":"{who} acaba de cambiar la alineación. ¿Empezar de todos modos?","nl":"{who} heeft net de opstelling gewijzigd. Toch beginnen?"},"remote.player.checking":{"en":"Checking…","fr":"Vérification…","de":"Wird geprüft…","es":"Comprobando…","nl":"Controleren…"},"remote.player.needFields":{"en":"Enter an email address and a password.","fr":"Saisis un e-mail et un mot de passe.","de":"Gib eine E-Mail-Adresse und ein Passwort ein.","es":"Introduce un correo y una contraseña.","nl":"Vul een e-mailadres en een wachtwoord in."},"remote.welcome.title":{"en":"Welcome to Darts","fr":"Bienvenue sur Darts","de":"Willkommen bei Darts","es":"Te damos la bienvenida a Darts","nl":"Welkom bij Darts"},"remote.welcome.sub":{"en":"Sign in and your stats follow you to any board. Or play as a guest — nothing is kept.","fr":"Connecte-toi et tes stats te suivent sur toutes les cibles. Ou joue en invité — rien n’est conservé.","de":"Melde dich an und deine Statistiken folgen dir auf jedes Board. Oder spiele als Gast — es wird nichts gespeichert.","es":"Inicia sesión y tus estadísticas te siguen a cualquier diana. O juega como invitado: no se guarda nada.","nl":"Log in en je statistieken volgen je naar elk bord. Of speel als gast — er wordt niets bewaard."},"remote.welcome.guest":{"en":"Play as a guest","fr":"Jouer en invité","de":"Als Gast spielen","es":"Jugar como invitado","nl":"Als gast spelen"},"remote.welcome.back":{"en":"Back","fr":"Retour","de":"Zurück","es":"Atrás","nl":"Terug"},"remote.guest.name":{"en":"What shall we call you?","fr":"Comment t’appelle-t-on ?","de":"Wie sollen wir dich nennen?","es":"¿Cómo te llamamos?","nl":"Hoe zullen we je noemen?"},"remote.guest.go":{"en":"Start playing","fr":"Commencer à jouer","de":"Losspielen","es":"Empezar a jugar","nl":"Beginnen met spelen"},"remote.guest.needName":{"en":"Enter a name to play under.","fr":"Saisis un nom pour jouer.","de":"Gib einen Namen zum Spielen ein.","es":"Escribe un nombre para jugar.","nl":"Vul een naam in om onder te spelen."},"remote.guest.note":{"en":"Playing as a guest — these throws are not saved to an account.","fr":"Tu joues en invité — ces lancers ne sont enregistrés sur aucun compte.","de":"Du spielst als Gast — diese Würfe werden keinem Konto gutgeschrieben.","es":"Juegas como invitado: estos lanzamientos no se guardan en ninguna cuenta.","nl":"Je speelt als gast — deze worpen worden niet op een account bewaard."}};
   var LANG = "en";   // baked in by the server: no flash of English on first paint
   var prCache = {};
 
@@ -943,6 +978,11 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
   var seats = null;       // { taken:[...], phones:n } — who else is on this board
   var mySeat = null;      // the player THIS phone is throwing for, per the server
   var isAdmin = false;    // is this session signed in as the board owner, per the server
+  var isGuest = false;    // identified, but to a name rather than an account
+  // What this page was built from. Compared against the board's on every session
+  // event — see the reload below.
+  var PAGE_STAMP = "4a3ede4c";
+
   var setupDone = false;  // just claimed this board: show the confirmation until dismissed
   // Only the SETUP QR carries this. Without it the board cannot be claimed, which
   // is what keeps setup and joining separate entry points.
@@ -1006,14 +1046,15 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
           var body = (t || "").trim();
           if (r.status === 403) {
             if (body.indexOf("admin") === 0) { seatMsg("remote.err.adminOnly"); return false; }
-            seatMsg("remote.seat.signIn"); showTab("player"); return false;
+            seatMsg("remote.seat.signIn"); return false;
           }
           if (r.status === 409) {
             // 409 is not only the turn rule. Telling someone "not your turn" when the
             // board is not set up sends them looking for entirely the wrong thing.
-            if (body.indexOf("not your turn") === 0) { seatMsg("remote.notYourTurn"); showTab("player"); return false; }
+            if (body.indexOf("not your turn") === 0) { seatMsg("remote.notYourTurn"); return false; }
             if (body.indexOf("board not set up") === 0) { seatMsg("remote.err.notSetUp"); return false; }
             if (body.indexOf("camera scoring off") === 0) { seatMsg("remote.err.camOff"); return false; }
+            if (body.indexOf("that has gone") === 0) { seatMsg("remote.err.gone"); return false; }
           }
           seatMsg("remote.notSent");
           return false;
@@ -1076,6 +1117,45 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
   function renderMenu(s){ document.querySelectorAll("#menu-list button").forEach(function(b){ b.classList.toggle("on", b.dataset.nav === s.screen); }); }
 
   // ================= PLAYERS =================
+  $("pl-setup").addEventListener("click", function(){ post({ type:"nav", screen:"setup" }); });
+  // Carries the code AND this phone's session: the app is the venue's records, so it
+  // is not handed over on the code alone.
+  // WHICH OF THE THREE DOORS. Only one card shows at a time, and Back returns to the
+  // welcome rather than leaving somebody in a form they did not choose.
+  // Its own toggle: the show helper is a local inside applyAccess, not in scope here.
+  function card(id, on){ var e = $(id); if (e) e.classList.toggle("hidden", !on); }
+  function showWelcome(which){
+    card("welcome", which === "welcome");
+    card("guest-box", which === "guest");
+    card("player-login", which === "signin" || which === "register");
+  }
+  $("wc-signin").addEventListener("click", function(){ showWelcome("signin"); });
+  $("wc-register").addEventListener("click", function(){ showWelcome("register"); });
+  $("wc-guest").addEventListener("click", function(){ showWelcome("guest"); $("gu-name").focus(); });
+  $("gu-back").addEventListener("click", function(){ showWelcome("welcome"); });
+
+  // A GUEST. Anonymous on purpose: they name themselves, and that name is not
+  // claimed from the list of people who play here — which is the thing that made a
+  // seat picker a way in for anybody holding the code off the wall.
+  $("gu-go").addEventListener("click", function(){
+    var name = ($("gu-name").value || "").trim();
+    if (!name) { guMsg("remote.guest.needName"); return; }
+    var q = "/cmd?code=" + encodeURIComponent(code) + (sid ? "&sid=" + encodeURIComponent(sid) : "");
+    fetch(q, { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify({ type:"guest", name:name }) })
+      .then(function(r){
+        if (!r.ok) { guMsg("remote.seat.failed"); return; }
+        signedIn = true;   // identified, though not to an account
+        isGuest = true;
+        applyAccess();
+        syncToBoard();
+        if (state) renderAll();
+      })
+      .catch(function(){ guMsg("remote.seat.failed"); });
+  });
+
+  $("open-app").addEventListener("click", function(){
+    location.href = "/app/?code=" + encodeURIComponent(code) + "&sid=" + encodeURIComponent(sid || "");
+  });
   $("pl-add").addEventListener("click", function(){ var v=($("pl-name").value||"").trim(); if(!v) return; post({ type:"add-player", name:v }); $("pl-name").value=""; });
   $("pl-name").addEventListener("keydown", function(e){ if (e.key==="Enter"){ e.preventDefault(); $("pl-add").click(); } });
   // START, with one question in front of it.
@@ -1122,11 +1202,7 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
       var x = el("button","x","✕"); x.addEventListener("click", (function(i){ return function(){ post({ type:"remove-slot", index:i }); }; })(idx)); row.appendChild(x);
       lu.appendChild(row);
     });
-    // saved profiles (highlight those already in the lineup)
-    var pb = $("pl-profiles"); pb.innerHTML="";
-    var inLineup = {}; (s.lineup||[]).forEach(function(sl){ if (sl && sl.id) inLineup[sl.id]=1; });
-    (s.profiles||[]).slice(0, 60).forEach(function(p){ var b = el("button","chipb" + (inLineup[p.id]?" on":""), p.name); b.addEventListener("click", function(){ post({ type:"toggle-lineup", id:p.id }); }); pb.appendChild(b); });
-    if (!(s.profiles||[]).length) pb.appendChild(elT("span","hint","remote.noProfiles"));
+
     // start enabled only with >=2 in the line-up
     $("pl-start").disabled = filled < 2;
     $("pl-start").textContent = filled < 2 ? T("remote.needPlayers") : T("remote.startGame");
@@ -1145,17 +1221,6 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
     ["walkOn","remote.set.walkOn",[["off","remote.set.off"],["first","remote.set.firstLeg"],["every","remote.set.everyLeg"]],false]
   ];
   var settingsBuilt = false;
-  function buildSettings(){
-    var body = $("set-body"); body.innerHTML="";
-    body.appendChild(elT("div","sec","remote.set.soundCaller"));
-    TOGGLES.forEach(function(t){ body.appendChild(makeToggle(t[0], t[1])); });
-    SLIDERS.forEach(function(sl){ if (sl[0]==="masterVolume") body.appendChild(makeSlider(sl)); });
-    SEGS.forEach(function(sg){ if (sg[0]==="voiceGender") body.appendChild(makeSeg(sg)); });
-    body.appendChild(elT("div","sec","remote.set.presentation"));
-    SEGS.forEach(function(sg){ if (sg[0]==="walkOn") body.appendChild(makeSeg(sg)); });
-    SLIDERS.forEach(function(sl){ if (sl[0]==="uiScale") body.appendChild(makeSlider(sl)); });
-    settingsBuilt = true;
-  }
   function makeToggle(key, labelKey){
     var row = el("div","srow"); row.appendChild(elT("span","lab",labelKey));
     var t = el("button","tog"); t.dataset.key=key; t.addEventListener("click", function(){ var on = !t.classList.contains("on"); t.classList.toggle("on", on); post({ type:"setting", key:key, value:on }); });
@@ -1178,23 +1243,6 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
     sg[2].forEach(function(o){ var b = o[1] ? elT("button",null,o[1]) : el("button",null,String(o[0])+"s"); b.dataset.val=String(o[0]); b.addEventListener("click", function(){ post({ type:"setting", key:sg[0], value:(sg[3]?Number(o[0]):o[0]) }); }); seg.appendChild(b); });
     row.appendChild(seg); return row;
   }
-  function renderSettings(s){
-    if (!s) return;
-    if (!settingsBuilt) buildSettings();
-    document.querySelectorAll("#set-body .tog").forEach(function(t){ t.classList.toggle("on", !!s[t.dataset.key]); });
-    document.querySelectorAll("#set-body input[type=range]").forEach(function(r){
-      if (r === draggingSlider) return;
-      var k = r.dataset.key; if (s[k]==null) return;
-      r.value = s[k]; var v = document.querySelector('.val[data-for="'+k+'"]');
-      if (v){ var sl = SLIDERS.filter(function(x){return x[0]===k;})[0]; v.textContent = sl ? sl[5](s[k]) : s[k]; }
-    });
-    document.querySelectorAll("#set-body .seg").forEach(function(seg){
-      var k = seg.dataset.key, num = seg.dataset.num==="1";
-      var cur = String(s[k]);
-      seg.querySelectorAll("button").forEach(function(b){ b.classList.toggle("on", b.dataset.val === cur); });
-    });
-  }
-
   // ================= SUGGEST =================
   // #173: the idea/bug/note selector was removed — everything is filed as "idea" (the
   // approval-required type), so nothing auto-ships unreviewed.
@@ -1292,8 +1340,10 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
   // Admin and seat both feed applyAccess, so every path that changes either one
   // ends up here.
   function renderAdmin(){
-    $("admin-settings").classList.toggle("hidden", !isAdmin);
-    $("admin-nav").classList.toggle("hidden", !isAdmin);
+    // The destination list needs no gate of its own. It lives on the pointer surface,
+    // which the phone reaches only by following the board, and it follows only once
+    // somebody has said who they are. The element this toggled no longer exists, so it
+    // was a null dereference waiting for the first render that reached it.
     // AUDIT-RELAY #11. The sign-in form POSTs to a RELATIVE /cmd — the board on
     // the board-served page, the STATIC HOST on the exported one. Hidden outright
     // over the relay, because a form that cannot reach anyone must not be a place
@@ -1344,6 +1394,7 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
   }
 
   function plMsg(key){ var m = $("pl-msg"); m.dataset.t = key || ""; m.textContent = key ? T(key) : ""; }
+  function guMsg(key){ var m = $("gu-msg"); if (!m) return; m.dataset.t = key || ""; m.textContent = key ? T(key) : ""; }
   // Create the account. Confirmation is NOT optional and is not a setting to relax:
   // link_client_account and link_player_account both require email_confirmed_at, and
   // without it anyone could register somebody else's address and become them at every
@@ -1553,6 +1604,44 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
   // Who this phone could be: the players in the running game, or — before one
   // starts — whoever is in the lineup. Bots are excluded: nobody is holding a
   // phone for them.
+  // THE PHONE IS THE MOUSE.
+  //
+  // Whichever screen the board is showing declares what is pointable, and it arrives
+  // in the snapshot. One plain list serves every screen: recordings, leagues, party
+  // night, mode settings, the darts in this leg. No bespoke phone UI per screen, and
+  // a screen added later is carried for free.
+
+  function renderPointer(s){
+    var items = (s && s.pointer) || [];
+    // The hint says look up. That is right only when there is nothing here to tap.
+    var sub = $("follow-sub");
+    if (sub) sub.classList.toggle("hidden", items.length > 0);
+    document.querySelectorAll(".point-list").forEach(function(box){ fillPointer(box, items); });
+  }
+
+  // One list, drawn into every slot that exists. Which slot is VISIBLE depends on the
+  // tab the phone is on, and that is decided by the board's screen — so drawing into
+  // only one of them means the list is sometimes rendered into a hidden view.
+  function fillPointer(box, items){
+    box.innerHTML = "";
+    var group = null;
+    items.forEach(function(it){
+      // A change of group ends the last one — INCLUDING a change to no group at all.
+      // Without that, an item with no heading of its own runs on under the previous
+      // heading, and an on/off switch reads as one more option of the setting above it.
+      if ((it.group || null) !== group) {
+        group = it.group || null;
+        box.appendChild(el("div", "psec", group || ""));
+      }
+      var b = el("button", "chipb" + (it.on ? " on" : "") + (it.sub ? " wide" : ""), it.label);
+      if (it.sub) {
+        b.appendChild(el("span", "psub", it.sub));
+      }
+      b.addEventListener("click", function(){ post({ type: "select", id: it.id }); });
+      box.appendChild(b);
+    });
+  }
+
   function seatOptions(s){
     // Bots are excluded from BOTH branches. This one never filtered them — the seat
     // list during a live game offered "Beginner Bot" as somebody you could be, and
@@ -1574,75 +1663,27 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
     var q = "/cmd?code=" + encodeURIComponent(code) + (sid ? "&sid=" + encodeURIComponent(sid) : "");
     fetch(q, { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify({ type:"seat", seat:name }) })
       .then(function(r){
-        if (r.ok) return r.json().then(function(j){ mySeat = j.seat || null; seatMsg(""); applyAccess(); if (state) renderAll(); });
-        // 403 is the sign-in gate, not a fault. "Could not save that. Try again." asked
-        // for a retry that could never work, and the picker used to be on screen before
-        // anyone had signed in, so this was the ordinary case rather than a corner.
-        seatMsg(r.status === 409 ? "remote.seat.taken"
-          : r.status === 403 ? "remote.seat.signIn" : "remote.seat.failed");
+        // syncToBoard, exactly as the relay's seated handler does. Taking a seat is the
+        // moment there is somewhere to follow TO — same as signing in — and without it
+        // the phone stays on the login card while the board sits on set-up or in a game.
+        // The relay had this and the LAN did not, which is the usual bug in this file
+        // running backwards.
+        if (r.ok) return r.json().then(function(j){ mySeat = j.seat || null; seatMsg(""); applyAccess(); syncToBoard(); if (state) renderAll(); });
+        // Only ever a RELEASE now — nothing picks a seat, so "taken" cannot happen and
+        // a 403 would mean the session had gone. One honest message covers both.
+        seatMsg(r.status === 403 ? "remote.seat.signIn" : "remote.seat.failed");
       })
       .catch(function(){ seatMsg("remote.seat.failed"); });
   }
 
-  function renderSeats(s){
-    var box = $("seat-list"); box.innerHTML = "";
-    var names = seatOptions(s);
-    var taken = (seats && seats.taken) || [];
-    if (!names.length) { box.appendChild(elT("div","hint","remote.seat.none")); }
-    names.forEach(function(n){
-      var mine = (n === mySeat);
-      var byOther = !mine && taken.indexOf(n) !== -1;
-      var b = el("button","chipb" + (mine ? " mine" : "") + (byOther ? " busy" : ""), n);
-      b.addEventListener("click", function(){
-        if (byOther) { seatMsg("remote.seat.taken"); return; }
-        claimSeat(mine ? "" : n); // tapping your own seat lets it go
-      });
-      box.appendChild(b);
-    });
+  // The picker is gone — signing in is what says who you are, and the board assigns
+  // the seat from the address the cloud returned. All that is left is handing it back.
+  function renderSeats(){
     $("seat-clear").classList.toggle("hidden", !mySeat);
   }
   $("seat-clear").addEventListener("click", function(){ claimSeat(""); });
 
   // ================= STATS =================
-  function statRow(name, cells, on){
-    var row = el("div","st-row" + (on ? " on" : ""));
-    row.appendChild(el("span","nm", name));
-    cells.forEach(function(c){
-      var wrap = el("span");
-      wrap.appendChild(el("span","nu", c[0]));
-      wrap.appendChild(document.createTextNode(" "));
-      wrap.appendChild(elT("span","lb", c[1]));
-      row.appendChild(wrap);
-    });
-    return row;
-  }
-  function renderStats(s){
-    // Live standings, straight off the game snapshot the pad already uses.
-    var sb = $("st-standings"); sb.innerHTML = "";
-    var g = s.game;
-    if (!g || !g.players || !g.players.length) {
-      sb.appendChild(elT("div","hint","remote.stats.noGame"));
-    } else {
-      g.players.forEach(function(p, i){
-        sb.appendChild(statRow(p.name, [[p.score == null ? "—" : String(p.score), "remote.stats.score"]], i === g.currentIdx));
-      });
-    }
-    // Career numbers, for the people at this board only (see App.jsx).
-    var cb = $("st-career"); cb.innerHTML = "";
-    var rows = s.stats || [];
-    if (!rows.length) { cb.appendChild(elT("div","hint","remote.stats.noCareer")); return; }
-    rows.forEach(function(r){
-      // A player with no recorded games gets dashes, not a misleading 0.0 average.
-      var played = r.games > 0;
-      cb.appendChild(statRow(r.name, [
-        [played ? r.avg.toFixed(1) : "—", "remote.stats.avg"],
-        [String(r.games), "remote.stats.games"],
-        [played ? r.pct + "%" : "—", "remote.stats.win"],
-      ]));
-    });
-  }
-
-  var tabBtns = document.querySelectorAll("#tabs button");
   /**
    * Three stages, and what each one may SEE.
    *
@@ -1669,14 +1710,23 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
     // latter, which was true when picking a chair was how you said who you are — but it
     // is shown to a signed-OUT phone, directly beneath the sign-in form, so it spent
     // this whole change telling people to do the one thing that is no longer the step.
-    var pl = $("player-login");
-    if (pl) pl.classList.toggle("hidden", !!mySeat || signedIn);
+    // WHICH IDENTITY CARD, IF ANY.
+    //
+    // This used to show the sign-in form whenever nobody was identified, because the
+    // form WAS the first screen. It is not: the welcome card is, and it decides which
+    // of the three doors is open. Left as it was, it forced the form up underneath the
+    // welcome — both on screen at once, asking the same question twice.
+    var idDone = !!mySeat || signedIn;
+    var cards = ["welcome", "guest-box", "player-login"];
+    if (idDone) {
+      cards.forEach(function(id){ var e = $(id); if (e) e.classList.add("hidden"); });
+    } else if (cards.every(function(id){ var e = $(id); return !e || e.classList.contains("hidden"); })) {
+      // Nothing is up and nobody is known — open on the welcome. Whichever card the
+      // person chose stays put, so this cannot yank them out of a half-typed password.
+      showWelcome("welcome");
+    }
     var show = function(id, on){ var e = $(id); if (e) e.classList.toggle("hidden", !on); };
-    show("saved-players", identified);
     show("id-hint", !identified);
-    // Selected by ID, not by a [data-tab=...] selector: the source-scanning
-    // test in remote-compartments counts those literals as tab declarations, and a
-    // selector string in the script read as a fourth tab.
     // The seat picker is not a choice until you have signed in — the gate refuses a seat
     // from a phone that has not said who it is, so offering it first is a dead end with a
     // misleading answer at the bottom of it. Sign in, THEN say which player you are.
@@ -1684,49 +1734,24 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
     // ways to say who you are, so it cannot be gated behind having already done so —
     // that was a locked door with the key inside, and it is why 33 of 34 real players
     // could do nothing at all here.
-    show("seat-box", true);
-    var statsBtn = $("tab-stats");
-    if (statsBtn) statsBtn.classList.toggle("hidden", !identified);
-    // Settings is the venue's, not the player's: admin only, exactly like the controls
-    // inside it have always been. Enforced on the BOARD too — the setting and nav
-    // commands are refused without admin — so hiding the tab is the courtesy, not the
-    // security.
-    // Suggestions used to be a box at the bottom of PLAYER, gated on being identified.
-    // It is a tab now, gated on the same thing — a suggestion carries who and where you
-    // were, so there is nothing to send from a phone that has not said who it is.
-    var sugBtn = $("tab-suggest");
-    if (sugBtn) sugBtn.classList.toggle("hidden", !identified);
-    var setBtn = $("tab-settings");
-    if (setBtn) setBtn.classList.toggle("hidden", !isAdmin);
-    // THE GAME TAB IS THE DARTPAD, and the dartpad is the one thing the server refuses
-    // outright from a phone that has not said who it is — every button on it 403s. It
-    // was shown anyway: a new player met a full, undimmed pad, tapped 20, and (before
-    // the fix in post()) got a flash and a buzz for a dart the board never saw.
+    show("open-app", !!(signedIn || mySeat || isAdmin));
+
+    // THE ONLY CARD THE PHONE CHOOSES FOR ITSELF.
     //
-    // Gated on the SAME condition the server gates commands on — signed in, or the
-    // owner — and NOT on identified, which is seat-or-admin: a signed-in phone with no
-    // seat is the shared wall pad, and that must keep scoring for bots and for players
-    // without a phone. (No backticks in this comment: the whole page is one template
-    // literal, and a stray pair ends it.)
+    // Saying who you are has to happen before the board will show anything, and it
+    // cannot be driven from the board — so it is the one exception to the board
+    // deciding. Everything after it follows the big screen.
     var canPlay = signedIn || !!mySeat || !!isAdmin;
-    var gameBtn = $("tab-game");
-    if (gameBtn) gameBtn.classList.toggle("hidden", !canPlay);
-    // Never strand someone on a view that has just been taken away from them. The
-    // fallback is the game tab, EXCEPT when that is the one being taken away — then
-    // there is exactly one place left to go, and it is the one with the sign-in form.
-    var home = canPlay ? "game" : "player";
-    var stats = $("view-stats");
-    if (!identified && stats && stats.classList.contains("on")) showTab(home);
-    var setView = $("view-settings");
-    if (!isAdmin && setView && setView.classList.contains("on")) showTab(home);
-    var gameView = $("view-game");
-    if (!canPlay && gameView && gameView.classList.contains("on")) showTab("player");
-    var sugView = $("view-suggest");
-    if (!identified && sugView && sugView.classList.contains("on")) showTab(home);
+    if (!canPlay) { showTab("player"); return; }
+    // Identified: catch up with wherever the board is, rather than sitting on the
+    // login card that is now empty.
+    var cur = document.querySelector(".view.on");
+    if (!cur || cur.id === "view-player") syncToBoard();
   }
 
-  function showTab(name){ document.querySelectorAll(".view").forEach(function(v){ v.classList.toggle("on", v.id==="view-"+name); }); tabBtns.forEach(function(b){ b.classList.toggle("on", b.dataset.tab===name); }); }
-  tabBtns.forEach(function(b){ b.addEventListener("click", function(){ showTab(b.dataset.tab); }); });
+  // Which single card the phone is showing. Chosen by the BOARD, never by a tap on
+  // the phone: there is no navigation here to disagree with the big screen.
+  function showTab(name){ document.querySelectorAll(".view").forEach(function(v){ v.classList.toggle("on", v.id==="view-"+name); }); }
   // #200: full-screen toggle. Best-effort across browsers (webkit prefixes for older Safari).
   // #224: iPhone has NO Full Screen API — and on iOS *every* browser is WebKit, so Chrome
   // there is no different. requestFullscreen is simply undefined, which meant the button
@@ -1788,22 +1813,32 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
   //   home / setup / play -> GAME   the line-up, the mode, the pad: one place on the phone
   //   stats / player / compare -> STATS
   //   settings -> SETTINGS          admin only, enforced below
-  var FOLLOW = { home:"game", setup:"game", play:"game", stats:"stats", player:"stats", compare:"stats", settings:"settings" };
+  // Only the screens where the phone is an INPUT device map to a card of its own:
+  // home and set-up carry the line-up, play carries the dartpad. Everything else —
+  // stats, settings, recordings, leagues, party night — is on the big screen, and the
+  // phone's job there is to point at it.
+  var FOLLOW = { home:"game", setup:"game", play:"game" };
   var lastScreen = null;
 
   // May this phone be shown that view? The same gates applyAccess uses, asked before
   // moving rather than after — landing somebody somewhere and bouncing them off it is
   // worse than not taking them.
-  function maySee(view){
-    if (view === "settings") return !!isAdmin;
-    if (view === "stats") return !!mySeat || !!isAdmin;
-    return true;
-  }
+  // Nothing to gate any more. It guarded the phone's own Stats and Settings cards,
+  // which were a second rendering of board screens and have been deleted — those
+  // screens are on the big screen now, and the phone points at them.
+  function maySee(){ return true; }
 
   // Returns whether it actually moved the phone. The caller only records a screen it
   // ACTED on — recording one it skipped would mark it handled for ever, and signing in
   // afterwards produces no change to react to.
   function followBoard(sc){
+    // Ahead of the screen map: the panel is an overlay ON a screen, so the board can
+    // be on home and asking for a suggestion at the same time.
+    if (state && state.suggesting) { showTab("suggest"); return true; }
+    // The board on its Settings screen: everything there is pointable ON the board,
+    // except the owner account, which needs a keyboard. Admins get that card; everyone
+    // else gets the pointer surface like any other screen.
+    if (sc === "settings" && isAdmin) { showTab("owner"); return true; }
     // Nothing to follow to until they have said who they are — and a board screen change
     // must never wipe a half-typed sign-in.
     //
@@ -1856,8 +1891,8 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
     // every non-claim command on an unclaimed board, so leaving Game reachable would only
     // offer taps that come back 409 — a set-up screen beside a fully working game menu reads
     // as "setup is optional", which is exactly the wrong first impression of a venue product.
-    var tabsEl = $("tabs");
-    if (tabsEl) tabsEl.classList.toggle("hidden", unclaimed);
+    // There is no tab bar to hide any more; sending the phone to the login card is the
+    // whole of it, since that card is the only one an unclaimed board has any use for.
     if (unclaimed) showTab("player");
     // applyAccess() shows the id-hint whenever nobody is identified, which on a board
     // with no owner left it sitting under a SETUP form — telling somebody to sign in
@@ -1865,7 +1900,7 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
     var hint = $("id-hint");
     if (hint && unclaimed) hint.classList.add("hidden");
     renderSeats(state);
-    renderStats(state);
+    renderPointer(state);
     // The pad and the set-up block swap rather than stack: before a game the pad
     // scores nothing, and during one the lineup is settled.
     var live = !!(state.game && !state.game.over);
@@ -1879,11 +1914,10 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
     $("pad").classList.toggle("notmine", blocked);
     if (!blocked && $("seat-msg").dataset.t === "remote.notYourTurn") seatMsg("");
     $("setup").classList.toggle("hidden", live);
-    // First state after connecting picks the compartment: a phone with no seat is
-    // someone who has just walked in and needs to say who they are; a phone that
-    // already holds one wants the pad.
-    if (!pickedTab) { pickedTab = true; showTab(mySeat ? "game" : "player"); }
-    renderSettings(state.settings);
+    // The first state after connecting: catch up with the board. applyAccess holds the
+    // only rule about which card is up — say who you are, then follow the big screen —
+    // and a second copy of that rule here is how the two would come to disagree.
+    if (!pickedTab) { pickedTab = true; applyAccess(); }
     renderSuggest(state);
   }
 
@@ -1922,6 +1956,28 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
     // a stored sid is dead here too. Keeping it would just make the next connect
     // present a stale id the server has to reject.
     sid = ""; try { localStorage.removeItem("darts_remote_sid"); } catch(e){}
+    // FETCH THE PAGE AGAIN ON THE WAY BACK TO THE GATE.
+    //
+    // A rotated join code means the board restarted, and a board restarts because it
+    // was updated. This page is whatever HTML the phone downloaded hours ago: type the
+    // new code into it and you reconnect straight back into the old UI — reported as
+    // screens that were deleted still being on the phone.
+    //
+    // Always, not only when the URL has a query. That was the old guard and it is the
+    // wrong signal: a phone opened from the home screen has no query, and neither does
+    // one that has already been reloaded once — so the phones most likely to be holding
+    // an old page were exactly the ones it skipped.
+    //
+    // The loop guard is a flag on this page instance instead. One refetch per load: if
+    // the fresh page comes back to the gate again, that is a wrong code rather than an
+    // old page, and it says so instead of reloading for ever.
+    try {
+      if (!sessionStorage.getItem("darts_remote_refetched")) {
+        sessionStorage.setItem("darts_remote_refetched", "1");
+        location.replace(location.pathname);
+        return;
+      }
+    } catch (e) { /* private mode: skip the refetch rather than lose the gate */ }
     $("app").classList.add("hidden");
     $("pair").classList.remove("hidden");
     $("pairErr").textContent = msg ? T(msg) : "";
@@ -2027,6 +2083,10 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
         // Admin is the SERVER's answer, never this page's opinion — it is
         // re-sent on reconnect and revoked when the venue changes its PIN.
         if (s) isAdmin = !!s.admin;
+        // THE BOARD HAS BEEN UPDATED UNDER US. Reload rather than carry on: this page
+        // is talking to a server that no longer matches it, and every refusal from
+        // here would be a puzzle rather than an answer.
+        if (s && s.stamp && PAGE_STAMP && s.stamp !== PAGE_STAMP) { location.reload(); return; }
         renderAdmin();
       } catch(e){}
     });
@@ -2082,7 +2142,7 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
       try {
         var e = JSON.parse(ev.data);
         if (!e || !e.reason) return;
-        if (e.reason === "not your turn") { seatMsg("remote.notYourTurn"); showTab("player"); return; }
+        if (e.reason === "not your turn") { seatMsg("remote.notYourTurn"); return; }
         // The LAN reads this off the 409 inside startGame; over the relay the send has
         // already returned, so the prompt has to be raised from here instead — and
         // without it a relay phone could not start the game at all during the grace.
@@ -2103,6 +2163,7 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
         if (e.reason === "sign in first") { seatMsg("remote.seat.signIn"); return; }
         if (e.reason === "board not set up") { seatMsg("remote.err.notSetUp"); return; }
         if (e.reason === "camera scoring off") { seatMsg("remote.err.camOff"); return; }
+        if (e.reason === "that has gone") { seatMsg("remote.err.gone"); return; }
         if (e.reason === "admin required") { seatMsg("remote.err.adminOnly"); return; }
         // Anything else the board learns to refuse with. Vague, and the player at
         // least knows the tap did not land.
