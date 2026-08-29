@@ -981,7 +981,7 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
   var isGuest = false;    // identified, but to a name rather than an account
   // What this page was built from. Compared against the board's on every session
   // event — see the reload below.
-  var PAGE_STAMP = "5149abb1";
+  var PAGE_STAMP = "00f9a94f";
 
   var setupDone = false;  // just claimed this board: show the confirmation until dismissed
   // Only the SETUP QR carries this. Without it the board cannot be claimed, which
@@ -1140,6 +1140,14 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
   $("gu-go").addEventListener("click", function(){
     var name = ($("gu-name").value || "").trim();
     if (!name) { guMsg("remote.guest.needName"); return; }
+    // OVER THE RELAY THIS PAGE IS NOT ON THE BOARD. A relative /cmd reaches the static
+    // host that served the page, which has no such route — a 404 that reads as though
+    // the board refused something. The seat and sign-in forms learned this already.
+    if (RELAY) {
+      RELAY.send({ type: "guest", name: name });
+      // The answer arrives on this phone's own channel, handled with the seat reply.
+      return;
+    }
     var q = "/cmd?code=" + encodeURIComponent(code) + (sid ? "&sid=" + encodeURIComponent(sid) : "");
     fetch(q, { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify({ type:"guest", name:name }) })
       .then(function(r){
@@ -2132,6 +2140,10 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
         var j = JSON.parse(ev.data);
         mySeat = (j && j.seat) || null;
         if (j && typeof j.admin === "boolean") isAdmin = j.admin;
+        // A guest arrives here too, over the relay. The HTTP branch marks them
+        // identified inline; this is the same two lines for the transport that answers
+        // on a channel instead of in a response.
+        if (j && j.guest) { signedIn = true; isGuest = true; }
         seatMsg("");
         applyAccess();
         syncToBoard();
