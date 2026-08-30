@@ -866,6 +866,11 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
         <div id="sugMsg"></div>
         <button class="bigbtn" id="sug-send" style="background:var(--gold);color:#1a1400" data-t="remote.sug.save">Vorschlag speichern</button>
         <div class="hint" id="sug-count"></div>
+        <!-- The board's OWN suggestions screen, when it is open: the list of what has
+             already been raised, and what can be done with each one. Without a slot here
+             it would have been filled into the other three, every one of them inside a
+             view nobody is looking at while this card is up. -->
+        <div class="chips point-list"></div>
       </section>
 
 
@@ -981,7 +986,7 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
   var isGuest = false;    // identified, but to a name rather than an account
   // What this page was built from. Compared against the board's on every session
   // event — see the reload below.
-  var PAGE_STAMP = "3eb17334";
+  var PAGE_STAMP = "4e1a386c";
 
   var setupDone = false;  // just claimed this board: show the confirmation until dismissed
   // Only the SETUP QR carries this. Without it the board cannot be claimed, which
