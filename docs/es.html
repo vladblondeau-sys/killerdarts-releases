@@ -377,7 +377,12 @@ const STALE_CHECK_MS = 5000;
 // "notice" is SHARED on purpose: it is the room being told what somebody did — who
 // picked the mode, who added a bot — and it carries a NAME rather than a sid, which is
 // the same rule _seats() states at length on the board side.
-const SHARED_EVENTS = new Set(["state", "seats", "ping", "notice"]);
+// "mirror-live" is the board's game and line-up, for a phone rendering the board's own
+// app rather than the controller page. Shared for the same reason as "notice": it is the
+// live leg everybody in the room is already looking at, and it carries no sid. The FULL
+// mirror is deliberately absent and always will be — megabytes of match history, which
+// is why the live slice was split out of it in the first place.
+const SHARED_EVENTS = new Set(["state", "seats", "ping", "notice", "mirror-live"]);
 // "signin" is the answer to a sign-in sent over the relay. It MUST be private: it
 // carries the address Supabase returned and whether that account owns the board, and
 // the shared channel reaches every phone holding the join token.
@@ -986,7 +991,7 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
   var isGuest = false;    // identified, but to a name rather than an account
   // What this page was built from. Compared against the board's on every session
   // event — see the reload below.
-  var PAGE_STAMP = "b726469f";
+  var PAGE_STAMP = "a8c63b65";
 
   var setupDone = false;  // just claimed this board: show the confirmation until dismissed
   // Only the SETUP QR carries this. Without it the board cannot be claimed, which
@@ -1167,6 +1172,17 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
   });
 
   $("open-app").addEventListener("click", function(){
+    // RELATIVE over the relay, absolute on the LAN, and the difference is not cosmetic.
+    //
+    // The board owns its whole origin, so /app/ is exactly right there. A static host
+    // usually does not: GitHub Pages serves a project site from /<repo>/, so an absolute
+    // /app/ leaves the site entirely and lands on a 404 at the host root.
+    //
+    // The code carries the JOIN TOKEN here rather than the 6-digit LAN code, because over
+    // the relay that is what identifies the board — there is no board to type a code at.
+    // No sid: the app mints and keeps its own under the same localStorage key this page
+    // uses, and on one origin that is the same phone holding the same seat.
+    if (RELAY) { location.href = "app/?code=" + encodeURIComponent(relayToken); return; }
     location.href = "/app/?code=" + encodeURIComponent(code) + "&sid=" + encodeURIComponent(sid || "");
   });
   $("pl-add").addEventListener("click", function(){ var v=($("pl-name").value||"").trim(); if(!v) return; post({ type:"add-player", name:v }); $("pl-name").value=""; });
