@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KillerDarts</title>
+    <script type="module" crossorigin src="./assets/index-B7lECD0R.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-Ba1SNzoU.css">
+  <script>window.RELAY_CONFIG = {"url":"https://nwjuflsfxufutiuqppyp.supabase.co","anonKey":"sb_publishable_LxbUZmvkQSJxsMMjjlZKVg_EK7fiY3Z"};</script>
+<script>"use strict";
+
+/**
+ * The Realtime wire format, in one place.
+ *
+ * Supabase Realtime speaks Phoenix channels: a WebSocket carrying JSON frames
+ * with a topic, an event, a payload and a ref. There is no SDK here on purpose —
+ * @supabase/supabase-js would pull a dependency tree into the main process to
+ * save perhaps sixty lines — but that decision only stays cheap if exactly one
+ * piece of code knows the format.
+ *
+ * BOTH ENDS USE THIS FILE. The board (relayClient.js) requires it; the phone page
+ * has it inlined verbatim at export time (scripts/build-remote-page.mjs). They are
+ * the two halves of one conversation, and a board that joins "realtime:<token>"
+ * while the phone subscribes to "<token>" is a pairing that fails with both sides
+ * looking healthy — no error, no traffic, nothing to read. Sharing the source
+ * makes that particular silence impossible.
+ *
+ * Pure by design: no sockets, no timers, no I/O. Everything here is a value in
+ * and a value out, so the frames can be asserted directly rather than inferred
+ * from what a fake socket happened to receive.
+ */
+
+/** The channel a board and its phones meet on. The join token IS the name. */
+function sharedTopic(token) {
+  return "realtime:" + token;
+}
+
+/**
+ * The channel for messages meant for ONE phone — its seat, its admin flag.
+ *
+ * Named by that phone's own sid, which is 128 bits and never broadcast, so no
+ * other phone can guess it. Same model as the join token: the name is the secret.
+ */
+function privateTopic(token, sid) {
+  return sharedTopic(token) + ":" + sid;
+}
+
+/**
+ * The socket URL.
+ *
+ * http -> ws is a substitution rather than a URL rewrite so that https becomes
+ * wss without a second branch. The key is a query parameter because that is where
+ * Realtime looks for it; it is the PUBLISHABLE key, which is safe in a URL, and
+ * the secret/admin key must never be anywhere near this.
+ */
+function socketUrl(url, anonKey) {
+  return String(url).replace(/^http/, "ws").replace(/\/+$/, "") +
+    "/realtime/v1/websocket?apikey=" + encodeURIComponent(anonKey) + "&vsn=1.0.0";
+}
+
+/** The REST endpoint for a SECURITY DEFINER function (send_command, fetch_commands). */
+function rpcUrl(url, fn) {
+  return String(url).replace(/\/+$/, "") + "/rest/v1/rpc/" + fn;
+}
+
+function joinFrame(topic, ref) {
+  // self:false — our own broadcasts must not echo back and be read as somebody
+  // else's traffic. ack:false because nothing here waits on a per-message receipt;
+  // the join reply is the only acknowledgement that matters.
+  return { topic, event: "phx_join", payload: { config: { broadcast: { self: false, ack: false } } }, ref };
+}
+
+function leaveFrame(topic, ref) {
+  return { topic, event: "phx_leave", payload: {}, ref };
+}
+
+/**
+ * Keepalive.
+ *
+ * On the "phoenix" topic, NOT the channel: it works before a join and survives a
+ * channel error, so a socket that is open but carrying nothing is still detected.
+ * Realtime drops an idle socket at around sixty seconds.
+ */
+function heartbeatFrame(ref) {
+  return { topic: "phoenix", event: "heartbeat", payload: {}, ref };
+}
+
+function broadcastFrame(topic, event, payload, ref) {
+  return { topic, event: "broadcast", payload: { type: "broadcast", event: String(event), payload }, ref };
+}
+
+/**
+ * Read an incoming frame into something a caller can switch on, or null if it is
+ * not JSON at all.
+ *
+ * Returns { topic, kind, event, payload }, where kind is one of:
+ *   "joined"    the server accepted a phx_join on this topic
+ *   "broadcast" a message from the other end
+ *   "other"     anything else (presence, heartbeat replies, errors)
+ *
+ * Deliberately does not throw: a malformed frame must not kill a socket, or the
+ * board goes silent mid-leg with no way for anyone in the room to tell.
+ */
+function parseFrame(raw) {
+  let m;
+  try { m = JSON.parse(typeof raw === "string" ? raw : (raw && raw.data)); }
+  catch { return null; }
+  if (!m || typeof m !== "object") return null;
+  const topic = m.topic || "";
+  if (m.event === "phx_reply") {
+    const ok = !!(m.payload && m.payload.status === "ok");
+    return { topic, kind: ok ? "joined" : "other", event: "phx_reply", payload: m.payload };
+  }
+  if (m.event === "broadcast" && m.payload) {
+    return { topic, kind: "broadcast", event: m.payload.event || "", payload: m.payload.payload };
+  }
+  return { topic, kind: "other", event: m.event || "", payload: m.payload };
+}
+
+/**
+ * Does this payload contain a session token anywhere in it?
+ *
+ * Anything on the shared channel reaches every phone holding the join token, and
+ * a leaked sid is a phone able to come back as somebody else. Checked rather than
+ * trusted, because the way it would actually happen is a future caller passing a
+ * richer object to a function whose name gives no warning.
+ */
+function carriesSid(v, depth) {
+  depth = depth || 0;
+  if (!v || typeof v !== "object" || depth > 6) return false;
+  if (Array.isArray(v)) return v.some(function (x) { return carriesSid(x, depth + 1); });
+  for (const k of Object.keys(v)) {
+    if (k === "sid" || k === "sids") return true;
+    if (carriesSid(v[k], depth + 1)) return true;
+  }
+  return false;
+}
+
+const RELAY_PROTOCOL = {
+  sharedTopic, privateTopic, socketUrl, rpcUrl,
+  joinFrame, leaveFrame, heartbeatFrame, broadcastFrame,
+  parseFrame, carriesSid,
+};
+
+// Works required from the main process, and works inlined into the phone page as
+// a plain script — the page has no module loader and must not need one.
+if (typeof module !== "undefined" && module.exports) module.exports = RELAY_PROTOCOL;
+else if (typeof globalThis !== "undefined") globalThis.RELAY_PROTOCOL = RELAY_PROTOCOL;
+</script>
+<script>"use strict";
+
+/**
+ * The PHONE's half of the relay. Inlined into the exported controller page.
+ *
+ * Mirrors relayClient.js, and deliberately reads the wire format from the same
+ * relayProtocol.js rather than reimplementing it: a phone subscribing to a topic
+ * the board never joins is a pairing that fails with both ends looking healthy.
+ *
+ * The asymmetry, from this side:
+ *
+ *   board -> me      BROADCAST on the shared channel (state, seats). Everything
+ *                    here reaches every phone holding the join token, so it is
+ *                    only ever what all of them may see.
+ *
+ *   board -> me only BROADCAST on a channel named by MY sid — my seat, whether my
+ *                    session is admin. 128 bits, never broadcast anywhere, so no
+ *                    other phone can guess the name.
+ *
+ *   me -> board      send_command, an RPC no client can read back (0011). Then a
+ *                    contentless POKE on the shared channel so the board drains
+ *                    immediately instead of waiting for a poll. The poke says only
+ *                    that something is waiting — never what, never from whom.
+ *
+ * MY SID IS MINE. The LAN server issues one over SSE; here the phone mints its
+ * own and keeps it in localStorage. That is not a downgrade — entropy is what
+ * makes a sid unguessable, not who generated it — and it removes the only reason
+ * a sid would ever have to travel board-to-phone, where broadcast would have
+ * shown it to the whole pub.
+ */
+
+const P = (typeof require === "function")
+  ? require("./relayProtocol.js")
+  : (typeof globalThis !== "undefined" ? globalThis.RELAY_PROTOCOL : null);
+
+const HEARTBEAT_MS = 25000;
+const RECONNECT_MIN_MS = 1000;
+const RECONNECT_MAX_MS = 30000;
+
+// A join that is never acknowledged has to be given up on. The board has always
+// had this; the phone did not. (AUDIT-RELAY 2nd pass)
+const JOIN_TIMEOUT_MS = 10000;
+
+// How long without hearing from the BOARD before this phone stops claiming to be
+// connected. Two of the board's ping intervals plus slack: one missed ping is a
+// dropped frame, two is a board that has gone. (AUDIT-RELAY #2/#12)
+const BOARD_STALE_MS = 60000;
+const STALE_CHECK_MS = 5000;
+
+// What each channel is allowed to say. Enumerated rather than inferred, because
+// the whole point is that an event's meaning depends on where it came from.
+//
+// "poke" is deliberately in NEITHER: pokes are addressed to the board, and a
+// phone acting on one is a phone answering another phone's traffic.
+// "notice" is SHARED on purpose: it is the room being told what somebody did — who
+// picked the mode, who added a bot — and it carries a NAME rather than a sid, which is
+// the same rule _seats() states at length on the board side.
+// "mirror-live" is the board's game and line-up, for a phone rendering the board's own
+// app rather than the controller page. Shared for the same reason as "notice": it is the
+// live leg everybody in the room is already looking at, and it carries no sid. The FULL
+// mirror is deliberately absent and always will be — megabytes of match history, which
+// is why the live slice was split out of it in the first place.
+const SHARED_EVENTS = new Set(["state", "seats", "ping", "notice", "mirror-live"]);
+// "signin" is the answer to a sign-in sent over the relay. It MUST be private: it
+// carries the address Supabase returned and whether that account owns the board, and
+// the shared channel reaches every phone holding the join token.
+//
+// It was missing here for a day. The board published it, this dropped it, and the
+// phone sat on "Checking…" while the board had in fact signed the player in — the
+// tabs unlocked, because "session" was allowed and "signin" was not. Found by a phone
+// on mobile data; the tests could not see it because each side was checked against its
+// own idea of the protocol. test/relay-event-names.test.js now checks them against
+// EACH OTHER.
+// seated: the answer to a seat claim. Named here or the phone drops it on the floor —
+// which is exactly what happened to "signin" when it was published but not allowed.
+const PRIVATE_EVENTS = new Set(["session", "cmderr", "signin", "seated"]);
+
+/**
+ * A fresh session id: 128 bits of CSPRNG, hex.
+ *
+ * Not the join token's alphabet — this is never read aloud or typed, only stored
+ * and compared, so hex keeps it boring. crypto.getRandomValues is present on every
+ * browser that can run this page; there is deliberately NO Math.random fallback,
+ * because a guessable sid is a phone that can be impersonated and silently
+ * degrading to that would be worse than failing here.
+ */
+function mintSid(cryptoImpl) {
+  const c = cryptoImpl || (typeof crypto !== "undefined" ? crypto : null);
+  if (!c || typeof c.getRandomValues !== "function") throw new Error("no CSPRNG available");
+  const b = new Uint8Array(16);
+  c.getRandomValues(b);
+  let out = "";
+  for (let i = 0; i < b.length; i++) out += b[i].toString(16).padStart(2, "0");
+  return out;
+}
+
+/**
+ * @param {object} cfg
+ * @param {string} cfg.url      Supabase project URL.
+ * @param {string} cfg.anonKey  The publishable key. Baked into the page, which is
+ *   why it must be the publishable one and nothing else.
+ * @param {string} cfg.token    Join token from the QR — names the shared channel.
+ * @param {string} cfg.sid      This phone's session id (mintSid, then persisted).
+ * @param {(name:string, data:any)=>void} cfg.onEvent  "state" | "seats" | "session".
+ * @param {(s:object)=>void} [cfg.onStatus]
+ */
+function createRelayPhone(cfg) {
+  const { url, anonKey, token, sid, onEvent } = cfg || {};
+  if (!P) throw new Error("relay protocol not loaded");
+  if (!url || !anonKey || !token || !sid) throw new Error("relay phone needs url, anonKey, token and sid");
+  if (typeof onEvent !== "function") throw new Error("relay phone needs an onEvent handler");
+
+  const WS = cfg.WebSocketImpl || (typeof WebSocket !== "undefined" ? WebSocket : null);
+  if (!WS) throw new Error("no WebSocket implementation available");
+  const doFetch = cfg.fetchImpl || ((...a) => fetch(...a));
+  const onStatus = cfg.onStatus || (() => {});
+  const setT = cfg.setTimeoutImpl || setTimeout;
+  const clearT = cfg.clearTimeoutImpl || clearTimeout;
+
+  const shared = P.sharedTopic(token);
+  const mine = P.privateTopic(token, sid);
+
+  let ws = null, ref = 0, joined = false, closed = false, attempt = 0;
+  let hbTimer = null, rcTimer = null, staleTimer = null, joinTimer = null;
+  const now = cfg.nowImpl || (() => Date.now());
+  let lastBoardAt = 0;   // when the board last said anything
+  let boardStale = false;
+
+  const nextRef = () => String(++ref);
+  const send = (o) => { try { ws && ws.send(JSON.stringify(o)); } catch { /* the heartbeat will notice */ } };
+  // `live` is the honest answer to "can this phone reach the board", which is NOT
+  // the same as "is my socket up" — the socket is to Supabase, and it stays up
+  // when the board is switched off.
+  const status = (state, extra) => onStatus({ state, joined, live: joined && !boardStale, ...(extra || {}) });
+
+  /** The board said something. Anything at all counts, including a bare ping. */
+  function heardFromBoard() {
+    lastBoardAt = now();
+    if (boardStale) { boardStale = false; status("joined"); }
+  }
+
+  function watchBoard() {
+    staleTimer = setT(watchBoard, STALE_CHECK_MS);
+    if (!joined || boardStale || !lastBoardAt) return;
+    if (now() - lastBoardAt < BOARD_STALE_MS) return;
+    // Joined to the rendezvous, hearing nothing from the board. Say so rather
+    // than keep showing a green dot over a dead pub PC. (AUDIT-RELAY #2/#12)
+    boardStale = true;
+    status("board-gone", { sinceMs: now() - lastBoardAt });
+  }
+
+  function heartbeat() {
+    send(P.heartbeatFrame(nextRef()));
+    hbTimer = setT(heartbeat, HEARTBEAT_MS);
+  }
+
+  function scheduleReconnect() {
+    if (closed || rcTimer) return;
+    // A phone in a pocket loses signal constantly. Backoff keeps a bad cell from
+    // hammering the rendezvous, capped so coming back is never slower than 30s.
+    const wait = Math.min(RECONNECT_MIN_MS * Math.pow(2, attempt), RECONNECT_MAX_MS);
+    attempt++;
+    status("reconnecting", { inMs: wait, attempt });
+    rcTimer = setT(() => { rcTimer = null; open(); }, wait);
+  }
+
+  function open() {
+    if (closed) return;
+    joined = false;
+    status("connecting");
+    try { ws = new WS(P.socketUrl(url, anonKey)); }
+    catch (e) { status("error", { error: String((e && e.message) || e) }); scheduleReconnect(); return; }
+
+    ws.onopen = () => {
+      send(P.joinFrame(shared, nextRef()));
+      send(P.joinFrame(mine, nextRef()));  // my seat and admin flag arrive here
+      heartbeat();
+      if (!staleTimer) watchBoard();
+      // A socket that opens but never JOINS is the worst of both: it looks
+      // connected and carries nothing, and nothing else here can notice.
+      // (AUDIT-RELAY 2nd pass)
+      //
+      // The board has had this guard all along (relayClient JOIN_TIMEOUT_MS); the
+      // phone did not. A refused join comes back as a phx_reply with status other
+      // than "ok", which relayProtocol files under kind "other" and the handler
+      // below drops. The board-gone watchdog cannot cover it either — that is
+      // gated on `joined`, which never became true. And the keepalive actively
+      // holds the socket open, so ws.onclose never fires and nothing ever retries.
+      // The result was a phone stuck on "Reconnecting" until the app was
+      // force-quit, which on an installed PWA means no address bar to reload from.
+      if (joinTimer) clearT(joinTimer);
+      joinTimer = setT(function () {
+        joinTimer = null;
+        if (joined) return;
+        status("error", { error: "join timed out" });
+        try { ws.close(); } catch (e) { /* already gone */ }  // onclose schedules the retry
+      }, JOIN_TIMEOUT_MS);
+    };
+
+    ws.onmessage = (ev) => {
+      const m = P.parseFrame(ev);
+      if (!m) return;
+
+      if (m.kind === "joined") {
+        // The SHARED channel is the one that means "connected" — the private one
+        // carries only occasional replies, so a phone could sit joined to it alone
+        // and never learn the game had started.
+        if (m.topic === shared && !joined) {
+          joined = true; attempt = 0;
+          // Start the clock HERE rather than treating the join as contact: the
+          // join is Supabase answering, not the board. Without this a phone that
+          // joins while the board is already off would never go stale, because
+          // lastBoardAt would stay 0.
+          lastBoardAt = now(); boardStale = false;
+          if (joinTimer) { clearT(joinTimer); joinTimer = null; }
+          status("joined");
+        }
+        return;
+      }
+
+      if (m.kind !== "broadcast") return;
+
+      // WHICH CHANNEL an event arrived on decides whether it may be believed.
+      // (AUDIT-RELAY #6)
+      //
+      // The shared channel is not just readable by every phone holding the join
+      // token — it is WRITABLE by them. Unioning the two topics meant a punter
+      // with devtools could publish one `session` frame there and set every other
+      // phone's sid and admin flag: their commands would then queue under HIS sid,
+      // so the board's private replies for them would go to a channel he is joined
+      // to and they are not, and their own would fall permanently silent.
+      //
+      // Per-phone state is therefore accepted ONLY from the private channel, whose
+      // name is this phone's own sid and which no other phone can guess.
+      //
+      // Not a complete fix, and saying so: a token holder can still publish a
+      // fabricated `state` on the shared channel, because it is open by
+      // construction. Closing that needs Realtime authorization on
+      // realtime.messages, which is a schema change. What this does remove is the
+      // ability to take over another phone's identity, which is the part that
+      // outlives the session.
+      if (m.topic === shared) {
+        if (!SHARED_EVENTS.has(m.event)) return;
+        heardFromBoard();
+        // A ping carries nothing and exists only to be heard.
+        if (m.event !== "ping") onEvent(m.event, m.payload);
+        return;
+      }
+      if (m.topic === mine && PRIVATE_EVENTS.has(m.event)) { heardFromBoard(); onEvent(m.event, m.payload); }
+    };
+
+    ws.onerror = () => status("error", { error: "socket error" });
+    ws.onclose = () => {
+      if (hbTimer) { clearT(hbTimer); hbTimer = null; }
+      if (joinTimer) { clearT(joinTimer); joinTimer = null; }
+      joined = false;
+      boardStale = false; lastBoardAt = 0;
+      status("closed");
+      scheduleReconnect();
+    };
+  }
+
+  return {
+    sid,
+    connect() { closed = false; attempt = 0; open(); },
+    isJoined: () => joined,
+
+    /**
+     * Send one command to the board.
+     *
+     * The insert is what carries it; the poke only tells the board to look. So the
+     * poke is best-effort and failing to send it is NOT an error — the command is
+     * already queued, and the board drains on its next poke or reconnect either
+     * way. Reporting a failure here would make a phone re-tap a dart that landed.
+     */
+    async send(cmd) {
+      let res;
+      try {
+        res = await doFetch(P.rpcUrl(url, "send_command"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json", apikey: anonKey, Authorization: "Bearer " + anonKey },
+          body: JSON.stringify({ p_token: token, p_sid: sid, p_cmd: cmd }),
+        });
+      } catch (e) {
+        return { ok: false, reason: "offline" };
+      }
+      if (!res || !res.ok) return { ok: false, reason: "rejected", status: res && res.status };
+      send(P.broadcastFrame(shared, "poke", null, nextRef()));
+      return { ok: true };
+    },
+
+    close() {
+      closed = true;
+      if (hbTimer) { clearT(hbTimer); hbTimer = null; }
+      if (rcTimer) { clearT(rcTimer); rcTimer = null; }
+      if (staleTimer) { clearT(staleTimer); staleTimer = null; }
+      if (joinTimer) { clearT(joinTimer); joinTimer = null; }
+      try { ws && ws.close(); } catch { /* already gone */ }
+      ws = null; joined = false;
+    },
+  };
+}
+
+const RELAY_PHONE = { createRelayPhone, mintSid, HEARTBEAT_MS, RECONNECT_MIN_MS, RECONNECT_MAX_MS, BOARD_STALE_MS, STALE_CHECK_MS, JOIN_TIMEOUT_MS };
+
+if (typeof module !== "undefined" && module.exports) module.exports = RELAY_PHONE;
+else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE;
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
