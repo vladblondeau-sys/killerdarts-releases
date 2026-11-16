@@ -965,6 +965,26 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
   if (!relayToken) { try { relayToken = localStorage.getItem("darts_relay_token") || ""; } catch (e) {} }
   var RELAY = null; // the live client, once connect() builds it
 
+  // WHERE ACCOUNT CREDENTIALS MAY GO. (AUDIT-V26-6)
+  //
+  // Sign-in and registration send an email and an ACCOUNT password — the one that follows
+  // a person to every board they ever play on — and the card sends the session's bearer
+  // token. On THIS page they go to the project it was published for, relayCfg, and
+  // nowhere else. They used to go to state.cloud.url, and on the relay "state" arrives on
+  // the SHARED channel, which anybody holding the QR's join token can publish to
+  // (relayPhone.js): one forged frame naming another cloud.url, and every password typed
+  // into this form in the room went to whoever sent it. The relay and sign-in are one
+  // project or the relay could not work at all, so relayCfg is also the right answer.
+  //
+  // The board's own LAN page has no relayCfg, and its "state" comes down the board's SSE
+  // stream, which no other phone can write to — so there the board's word is the right
+  // one, and the only one. (No backticks in this comment: it sits inside the page's
+  // template literal, where one would end it.)
+  function authProject(){
+    var c = relayCfg ? relayCfg : (state && state.cloud);
+    return (c && c.url && c.anonKey) ? { url: String(c.url), anonKey: String(c.anonKey) } : null;
+  }
+
   // The last code that actually paired, kept in this browser / home-screen app's own storage.
   var stored = localStorage.getItem("darts_remote_code") || "";
   // Scanning the desktop QR lands here with ?c=<code>. #236 keeps that code in the url (not just
@@ -993,7 +1013,7 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
   var isGuest = false;    // identified, but to a name rather than an account
   // What this page was built from. Compared against the board's on every session
   // event — see the reload below.
-  var PAGE_STAMP = "9d19554b";
+  var PAGE_STAMP = "b38a9f73";
 
   var setupDone = false;  // just claimed this board: show the confirmation until dismissed
   // Only the SETUP QR carries this. Without it the board cannot be claimed, which
@@ -1326,6 +1346,12 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
   // ================= PLAYER (first-run board setup) =================
   function suMsg(key){ var m = $("su-msg"); m.dataset.t = key || ""; m.textContent = key ? T(key) : ""; }
   $("su-go").addEventListener("click", function(){
+    // Setting a board up posts the new owner's password to a RELATIVE /cmd, which on the
+    // relay page is the static host, not the board (AUDIT-RELAY #11, the same trap the
+    // board password is guarded against). A forged "claimed: false" can raise this form
+    // there, and a crafted link can carry a setup token. Refuse before reading a field.
+    // (AUDIT-V26-6)
+    if (relayCfg && relayToken) { $("su-pass").value = ""; $("su-pass2").value = ""; suMsg("remote.admin.lanOnly"); return; }
     var name = ($("su-name").value||"").trim();
     var email = ($("su-email").value||"").trim();
     var p1 = $("su-pass").value||"", p2 = $("su-pass2").value||"";
@@ -1409,7 +1435,7 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
   // which is a credential for every board this person ever plays on, onto the pub LAN.
   // (V25-4)
   function cloudSignIn(email, pass){
-    var c = state && state.cloud;
+    var c = authProject(); // never state.cloud on the relay — see authProject (AUDIT-V26-6)
     if (!c || !c.url || !c.anonKey) return Promise.resolve({ nocloud: true });
     return fetch(c.url + "/auth/v1/token?grant_type=password", {
       method: "POST",
@@ -1436,7 +1462,7 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
     var email = ($("pl-email").value||"").trim(), pass = $("pl-pass").value||"";
     if (!email || !pass) { plMsg("remote.player.needFields"); return; }
     if (pass.length < 8) { plMsg("remote.player.badPass"); return; }
-    var c = state && state.cloud;
+    var c = authProject(); // see authProject (AUDIT-V26-6)
     // No cloud on this board: there is nothing to register WITH, and saying so beats
     // a spinner. A board with no project configured is a local-only board.
     if (!c || !c.url || !c.anonKey) { plMsg("remote.player.offline"); return; }
@@ -1557,7 +1583,7 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
   // the same unit secret it restricts. Nothing here takes a unit secret, so a leaked one
   // reaches nothing. The board is not involved and does not learn the token.
   $("card-go").addEventListener("click", function(){
-    var c = state && state.cloud;
+    var c = authProject(); // the bearer token goes where the password went — see authProject (AUDIT-V26-6)
     if (!c || !c.url || !c.anonKey) { cardMsg("remote.card.offline"); return; }
     if (!myToken) { cardMsg("remote.card.signIn"); return; }
     cardMsg("remote.card.working");
@@ -2139,7 +2165,19 @@ else if (typeof globalThis !== "undefined") globalThis.RELAY_PHONE = RELAY_PHONE
         // THE BOARD HAS BEEN UPDATED UNDER US. Reload rather than carry on: this page
         // is talking to a server that no longer matches it, and every refusal from
         // here would be a puzzle rather than an answer.
-        if (s && s.stamp && PAGE_STAMP && s.stamp !== PAGE_STAMP) { location.reload(); return; }
+        //
+        // ONCE per board stamp per tab, though. A reload only cures this when it fetches
+        // a page that matches: always on the board's own LAN page, which the board serves
+        // itself, but on the relay only after the static copy has been republished — one
+        // GitHub Pages copy serves every board, whatever its version or language. There the
+        // board answered the re-sent hello with the same stamp and the page reloaded for
+        // ever, never reaching sign-in. (AUDIT-V26-7/8) If sessionStorage is unusable, no
+        // reload at all: a stale page that works beats a loop.
+        if (s && s.stamp && PAGE_STAMP && s.stamp !== PAGE_STAMP) {
+          var tried = s.stamp;
+          try { tried = sessionStorage.getItem("darts_remote_stamp_reload"); if (tried !== s.stamp) sessionStorage.setItem("darts_remote_stamp_reload", s.stamp); } catch (e) { tried = s.stamp; }
+          if (tried !== s.stamp) { location.reload(); return; }
+        }
         renderAdmin();
       } catch(e){}
     });
